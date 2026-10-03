@@ -20,8 +20,10 @@ export function decideTransition(input: {
   const order = input.ruleOrder ?? DEFAULT_RULE_ORDER
 
   if (request.actor.type === 'system') return { code: 'system_actor', kind: 'rejected' }
-  if (request.to === state.status) return { kind: 'noop' }
+  // OPEN is the default status, never something a client asks for, even when the case is
+  // already OPEN: the answer must not depend on the case's current state.
   if (request.to === 'OPEN') return { code: 'not_an_action', kind: 'rejected' }
+  if (request.to === state.status) return { kind: 'noop' }
   if (isTerminal(state.status)) return { code: 'case_closed', kind: 'rejected' }
 
   const before = factsFor(state)

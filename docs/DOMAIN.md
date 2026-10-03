@@ -220,7 +220,7 @@ brief's name, with the same value, and additionally returns `amount_minor` and `
 | --- | --- | --- | --- |
 | `UNDER_REVIEW` | `EVIDENCE_FILED` | status is `OPEN` and `now < deadline_at` | `409`, naming the rule |
 | `WON` / `LOST` | `SCHEME_OUTCOME_RECORDED` | status is not terminal | `409 case_closed` |
-| `OPEN` | — | never: it is the default, not an action | `422` |
+| `OPEN` | — | never, even if the case is already `OPEN`: it is the default, not an action | `422` |
 | same as current | nothing | always | `200`, no new event (safe retry) |
 
 The rules always win, and never silently: if the evaluated status differs from the requested one,

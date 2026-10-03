@@ -107,6 +107,13 @@ describe('transitions: the client asks, the rules decide', () => {
         state: state('UNDER_REVIEW'),
       }),
     ).toEqual({ code: 'not_an_action', kind: 'rejected' })
+    expect(
+      decideTransition({
+        now,
+        request: { actor: analyst, reason: null, to: 'OPEN' },
+        state: state('OPEN'),
+      }),
+    ).toEqual({ code: 'not_an_action', kind: 'rejected' })
     expect(decideTransition({ now, request: outcome('WON'), state: state('LOST') })).toEqual({
       code: 'case_closed',
       kind: 'rejected',
