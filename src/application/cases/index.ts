@@ -7,6 +7,12 @@ export { createCase, type CreateCaseInput, type CreateCaseResult } from './creat
 export { CaseError, type CaseErrorCode } from './errors.js'
 export type { CaseStore, CaseTransaction } from './ports.js'
 export { caseHistory, type CaseHistoryResult, findCaseByExternalRef, getCase } from './read-case.js'
+export {
+  stuckQueue,
+  type StuckQueueInput,
+  type StuckQueueItem,
+  type StuckQueueResult,
+} from './stuck-queue.js'
 export { sweepDeadlines, type SweepOptions, type SweepResult } from './sweep-deadlines.js'
 export { transitionCase, type TransitionInput, type TransitionResult } from './transition-case.js'
 export type {

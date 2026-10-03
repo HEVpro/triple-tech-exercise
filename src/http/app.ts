@@ -14,6 +14,7 @@ import { type AuthConfig, authenticate } from './auth.js'
 import { caseRoutes } from './cases/routes.js'
 import { errorBody, handleError, validationHook } from './errors.js'
 import { httpRequestDuration, metricsContentType, renderMetrics } from './metrics.js'
+import { reportRoutes } from './reports/routes.js'
 
 const healthSchema = z.object({
   service: z.string(),
@@ -114,7 +115,9 @@ export function createApp(deps: AppDependencies): OpenAPIHono<AppEnv> {
 
   app.use('/cases', authenticate(deps.auth))
   app.use('/cases/*', authenticate(deps.auth))
+  app.use('/reports/*', authenticate(deps.auth))
   app.route('/', caseRoutes(deps.caseStore))
+  app.route('/', reportRoutes(deps.caseStore))
 
   app.openAPIRegistry.registerComponent('securitySchemes', 'bearerAuth', {
     bearerFormat: 'JWT',
