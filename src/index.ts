@@ -1,13 +1,20 @@
 import { serve } from '@hono/node-server'
 
 import { env } from './config/env.js'
-import { app } from './http/app.js'
-import { closeDbPool } from './infrastructure/db/pool.js'
+import { createApp } from './http/app.js'
+import { postgresCaseStore } from './infrastructure/db/case-store.js'
+import { closeDbPool, database, dbPool } from './infrastructure/db/pool.js'
 import { logger } from './logger.js'
 import { SERVICE_NAME, VERSION } from './version.js'
 
 const config = env()
 const log = logger()
+
+const app = createApp({
+  auth: { audience: config.JWT_AUDIENCE, issuer: config.JWT_ISSUER, secret: config.JWT_SECRET },
+  caseStore: postgresCaseStore(database()),
+  ping: () => dbPool().query('SELECT 1'),
+})
 
 const server = serve({ fetch: app.fetch, port: config.PORT })
 

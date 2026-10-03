@@ -2,7 +2,7 @@
 
 How a dispute case behaves, written so it can be read without reading the code. The schema that
 enforces it is in [`../migrations`](../migrations) (phase 1); the rules themselves are pure
-TypeScript in [`../src/domain`](../src/domain) (phase 2). The domain never reads a clock: every
+TypeScript in [`../src/domain`](../src/domain) (phase 2), exposed by the API in phase 3. The domain never reads a clock: every
 decision takes `now` as an argument, and ESLint rejects `new Date()`, `Date.now()` and
 `Math.random()` there. Time-zone arithmetic uses the runtime's `Intl` time-zone data.
 
@@ -198,33 +198,66 @@ The database enforces that `system` is used for `DEADLINE_EXPIRED` and nothing e
 ## HTTP contract
 
 Unversioned paths, as in the brief, because banks already consume `GET /cases/:id` (D-27). Changes
-are additive only.
+are additive only, and `test/contract/case-v1.ts` fails the build on a removed, renamed or retyped
+field. The OpenAPI document generated from the code is served at `/docs`.
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `POST` | `/cases` | Create. Idempotent on `(tenant, external_ref)`. |
-| `GET` | `/cases/:id` | Current state, from the projection. |
-| `GET` | `/cases?external_ref=...` | Look up by the bank's own id. |
-| `POST` | `/cases/:id/transitions` | `{ to, reason, evidence? }` → a domain event. |
-| `POST` | `/cases/:id/notes` | `{ text }` → `NOTE_ADDED`. |
-| `GET` | `/cases/:id/history?as_of=` | Replay at an instant, default now. |
-| `GET` | `/reports/stuck-queue?risk_window_days=7` | The stuck-queue report. |
+| Method | Path | Body | Success |
+| --- | --- | --- | --- |
+| `POST` | `/cases` | `external_ref, amount_cents, currency, scheme, reason_code, presentment_date, reason?` | `201` created, `200` already existed with the same values |
+| `GET` | `/cases/:id` | — | `200` the case |
+| `GET` | `/cases?external_ref=…` | — | `200` `{ items: [case] }`, empty if none |
+| `POST` | `/cases/:id/transitions` | `to, reason` + the fact (see below) | `201` with `{ case, event }`, `200` with `event: null` if already there |
+| `POST` | `/cases/:id/notes` | `text` (≤ 2 KB) | `201` with `{ case, event }` |
+| `GET` | `/cases/:id/history?as_of=` | — | `200` `{ as_of, case_id, state, decided_by, events, truncated }` |
+| `GET` | `/reports/stuck-queue?risk_window_days=7` | — | phase 4 |
+
+**Authentication.** Every `/cases` route needs `Authorization: Bearer <token>`, an HS256 JWT checked
+for signature, `iss`, `aud` and `exp` (D-12, D-39). The token must carry:
+
+| Claim | Meaning |
+| --- | --- |
+| `tenant_id` | The bank. The only source of the tenant: no header, body field or query parameter. |
+| `sub` | The actor's id, stored on every event it causes. |
+| `actor_type` | `human` or `agent`. `system` is refused: only the sweeper is the system. |
+| `exp` | Required. A token without it would never expire. |
+
+Another tenant's case is answered with `404`, never `403`, on every route.
 
 **Money fields.** The column is `amount_minor`. The API accepts and returns `amount_cents`, the
 brief's name, with the same value, and additionally returns `amount_minor` and `currency_exponent`.
-`amount_cents` is documented as deprecated but never removed while a bank reads it.
+`amount_cents` is documented as deprecated but never removed while a bank reads it. Amounts are JSON
+integers, at most 10^15 minor units, so they stay exact after conversion to any base currency.
 
-**Transitions.** The client keeps the brief's vocabulary; the server records a fact:
+**Transitions.** The client keeps the brief's vocabulary; the server records a fact. `reason` is
+required on every transition, because the brief puts it on the event.
 
-| `to` | Recorded as | Allowed when | Otherwise |
-| --- | --- | --- | --- |
-| `UNDER_REVIEW` | `EVIDENCE_FILED` | status is `OPEN` and `now < deadline_at` | `409`, naming the rule |
-| `WON` / `LOST` | `SCHEME_OUTCOME_RECORDED` | status is not terminal | `409 case_closed` |
-| `OPEN` | — | never, even if the case is already `OPEN`: it is the default, not an action | `422` |
-| same as current | nothing | always | `200`, no new event (safe retry) |
+| `to` | Extra fields | Recorded as | Allowed when | Otherwise |
+| --- | --- | --- | --- | --- |
+| `UNDER_REVIEW` | `evidence_refs[]` | `EVIDENCE_FILED` | status is `OPEN` and `now < deadline_at` | `409 rule_conflict`, naming the rule |
+| `WON` / `LOST` | `scheme_decision_ref`, `scheme_decided_on` | `SCHEME_OUTCOME_RECORDED` | status is not terminal | `409 case_closed` |
+| `OPEN` | — | — | never, even if the case is already `OPEN`: it is the default, not an action | `422 not_an_action` |
+| same as current | — | nothing | always | `200`, no new event (safe retry) |
 
 The rules always win, and never silently: if the evaluated status differs from the requested one,
 the request is rejected with the rule that decided, and nothing is written.
+
+**Errors.** One envelope for every error, whatever produced it (D-40):
+
+```json
+{ "error": { "code": "rule_conflict", "message": "…", "details": { "decided_by": { "rule_key": "deadline_passed", "status": "LOST" } } } }
+```
+
+| Status | `code` |
+| --- | --- |
+| 400 | `validation_failed`; `details` lists `{ path, message }` per invalid field |
+| 401 | `unauthenticated` |
+| 403 | `tenant_not_found` |
+| 404 | `case_not_found`, `route_not_found` |
+| 409 | `rule_conflict`, `case_closed`, `external_ref_conflict` |
+| 422 | `not_an_action`, `unsupported_currency`, `presentment_in_future`, `response_window_missing` |
+| 500 / 503 | `internal_error`, `service_unavailable` |
+
+`code` is the stable part of the contract; `message` is for humans and may change.
 
 ---
 
@@ -344,9 +377,11 @@ Each is a property a test asserts, not a comment. Schema-level ones are tested i
 6. In-window is `instant < deadline_at`, half-open, defined once in `src/domain/deadline/deadline.ts`.
    *(domain: 1 ms before, at, and after — tested)*
 7. A tenant comes from the verified claim only. A cross-tenant read returns `404`, not `403`.
+   *(http: every route, and header/query attempts ignored — tested)*
 8. Money is integer minor units plus a currency. No floating point touches an amount. *(domain:
    `bigint` throughout `src/domain/money` — tested)*
 9. Every write to `cases` writes an event in the same transaction, with `seq = version`.
+   *(http: including two concurrent transitions on one case — tested)*
 10. `recorded_at` is the database clock; clients cannot backdate. *(schema: trigger + check — tested)*
 
 ---
