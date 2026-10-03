@@ -1,4 +1,5 @@
-npm run guard:console
+set -e
 npm run typecheck
 npm run lint
+npm run test
 npm run build

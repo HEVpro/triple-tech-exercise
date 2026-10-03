@@ -46,8 +46,10 @@ export default defineConfig(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    // Inline `eslint-disable` comments are ignored, so a rule cannot be switched off from a
+    // source file. Exceptions belong in this config, where they are reviewed.
     linterOptions: {
-      reportUnusedDisableDirectives: 'error',
+      noInlineConfig: true,
     },
     rules: {
       '@typescript-eslint/consistent-type-imports': [

@@ -7,14 +7,6 @@
   "endOfLine": "lf",
   "overrides": [
     {
-      "files": ["*.sql"],
-      "options": {
-        "language": "sql",
-        "keywordCase": "upper",
-        "tabWidth": 2
-      }
-    },
-    {
       "files": ["*.md"],
       "options": {
         "proseWrap": "preserve"

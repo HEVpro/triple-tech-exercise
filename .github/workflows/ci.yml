@@ -44,10 +44,6 @@ jobs:
 
       - run: npm run format:check
 
-      - run: npm run guard:console
-
-      - run: npm run guard:secrets
-
       - run: npm run typecheck
 
       - run: npm run lint
@@ -66,6 +62,17 @@ jobs:
 
       - name: Run sqlfluff via docker
         run: npm run lint:sql
+
+  secrets:
+    name: secret scan (gitleaks in docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan the full history
+        run: npm run scan:secrets
 
   commitlint:
     name: commit message lint
