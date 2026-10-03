@@ -328,6 +328,57 @@ tests and docs alongside the code they belong to. Work is presented as a commit 
 approves once, and each commit is verified individually with `git rebase --exec`. The existing
 history is left intact, as the brief asks, rather than rewritten to look better than it was.
 
+### 2.20 The ORM that phase 0 threw away
+
+**What happened:** in phase 0 the AI removed `drizzle-kit` because `npm audit` reported four moderate
+advisories (2.3), argued that hand-written SQL was more auditable, and left `drizzle-orm` installed
+and unused. Phases 1 and 2 then built a schema with no types, no validation derived from it, and
+nothing to stop the SQL and the code drifting apart.
+
+**How it was caught:** the human said plainly that this had been a mistake: the stack had been
+chosen to be used, and the project was reinventing what the libraries already do. A new rule went
+into AGENTS.md ("Libraries before custom code"): check the library first, in its documentation
+*and* its installed source, and build only the gap that is verified to exist.
+
+**What the surgical analysis found:**
+
+- The advisories are all one issue in esbuild's *development server*, which drizzle-kit never runs,
+  in a devDependency. `npm audit --omit=dev` is clean. The phase-0 reason was overstated.
+- drizzle's migrator, read in `drizzle-orm/pg-core/dialect.js`, really is unfit to *apply*
+  migrations to a live database: one transaction for every pending migration (no
+  `CREATE INDEX CONCURRENTLY`), pending-ness decided only by the last applied timestamp (edited and
+  out-of-order files pass silently), no lock. These are the same failures the runner was hardened
+  against in 2.16.
+
+**Correction:** D-38. Drizzle defines the schema and the queries, drizzle-zod the request schemas,
+drizzle-kit generates and checks migrations, and only applying them stays custom. The hand-written
+`0001`–`0010` were kept as the baseline rather than rewritten; a drift test builds one database from
+the migrations and another from the TypeScript schema and compares the catalogues. It caught a
+real mismatch on its first run: Drizzle names primary and foreign keys differently from PostgreSQL,
+which would have made drizzle-kit try to rename constraints in the next migration.
+
+### 2.21 Documentation, types and source disagreed; the source won
+
+Three times in phase 3 the documented behaviour of a library was not what the installed version did:
+
+- Hono's documentation shows `verify(token, secret, alg, issuer, aud)`; the installed version takes
+  `verify(token, key, { alg, iss, aud })`. It also only checks `exp` *if the token has one*, so a
+  token without `exp` would never expire; the API now requires the claim.
+- `drizzle-kit/api` declares its snapshot type with zod 3; with zod 4 installed the type does not
+  resolve. `tsc` hid it behind `skipLibCheck`; typed ESLint did not.
+- `pushSchema` from the same API hung without an error, so the drift test uses the in-memory
+  generator instead.
+
+Each was settled by reading the installed `.d.ts` or running the code, not by trusting the page.
+
+### 2.22 An API test found a domain inconsistency
+
+Phase 2's domain answered `OPEN` on an already-`OPEN` case with a no-op, because it checked "same
+status" before "OPEN is not an action". The documented contract says `OPEN` is always a `422`.
+Domain tests passed, because they only tried `OPEN` on cases in other states; the first API test
+that tried it on a fresh case failed. The order was fixed in the domain, where the rule lives, and
+the missing case was added to the domain tests.
+
 ---
 
 ## 3. Decision register
@@ -349,7 +400,7 @@ rejected column.
 | **D-9** (rev.) | Periodic sweeper over **`OPEN` only**, `FOR UPDATE SKIP LOCKED`, batch, idempotent, `system` actor. | `UNDER_REVIEW` filed evidence in time and cannot lose to the deadline (2.10). | Sweeping `UNDER_REVIEW` too; lazy evaluation on read; `pg_cron`. |
 | **D-10** (rev.) | `case_events` append-only by **grants** (`triple_app`: `SELECT`, `INSERT`), a **trigger** rejecting `UPDATE`/`DELETE`/`TRUNCATE` for every role, and **`ON DELETE RESTRICT`** to `cases`. `metadata JSONB` validated per type, ≤ 16 KB, no personal data. A future "delete" is a `CASE_VOIDED` event. | Audit that a single SQL statement can erase is not audit. | `ON DELETE CASCADE` (deleting a case erased its trail); convention only. |
 | **D-11** (rev.) | **Rules run on write only.** Events store `to_status`, `rule_key`, `ruleset_version`. History folds events with `recorded_at <= as_of` by `seq`, never evaluating a rule. 50 000-event cap with `truncated`. | The past must not depend on today's code or config (2.11). | Re-evaluating rules on read with `clock = as_of`; with `now()` (2.8). |
-| **D-12** (rev.) | v1 auth: locally minted HS256 tokens, refused in production; tenant and actor from claims only. | Tests tenant isolation without IdP setup. | OIDC/JWKS in v1 (deferred, TRADEOFFS §15); identity from headers. |
+| **D-12** (rev.) | v1 auth: locally minted HS256 tokens, refused in production; tenant and actor from claims only. Implemented in D-39. | Tests tenant isolation without IdP setup. | OIDC/JWKS in v1 (deferred, TRADEOFFS §15); identity from headers. |
 | **D-13** | **No partitioning.** Revisit on phase 5 evidence. | No hot query benefits; all are tenant-scoped and index-backed. | Partitioning up front. |
 | **D-14** | The migration runner supports **per-migration transaction control** (`-- migrate:no-transaction`, one statement per file). | `CREATE INDEX CONCURRENTLY` cannot run in a transaction and must stay in the migration system. | Wrapping every migration in a transaction. |
 | **D-15** | `typescript@5.9.3`, pinned exactly. | `typescript-eslint@8.71.0` requires `<6.1.0`. | `typescript@latest` (7.0.2). |
@@ -372,6 +423,11 @@ rejected column.
 | **D-32** | Secret scanning with **gitleaks v8.30.1 in Docker** over the full history, in CI and as `npm run scan:secrets`. | A maintained scanner instead of 130 lines of local regexes. | The homemade guard script. |
 | **D-33** (rev.) | Runner: SHA-256 checksums, advisory lock, ledger named `triple_migrations`, refusal of a non-empty database without a ledger, `lock_timeout = 5s` for transactional migrations, **no timeouts for concurrent index builds** and cleanup of the `INVALID` index a failed build leaves, forward only. | Safe and auditable against live traffic (2.16). | A uniform `lock_timeout` and a global invalid-index check (2.16); `drizzle-kit` (2.3); a `down` command nobody tests. |
 | **D-34** | Greenfield schema with **live-safe migrations**, plus a written rollout plan for 60+ tenants (`docs/MIGRATION_PLAN.md`). No invented legacy import. | What the brief asks is that our migrations can run on live data. | Modelling and backfilling a hypothetical legacy database (2.13). |
+| **D-42** | The API connects as `triple_api`, a login role in `triple_app`, created by `npm run dev:seed` from `DATABASE_URL`; migrations and the seed use the owner's `MIGRATION_DATABASE_URL`. API tests run as `triple_api` too. | In the running system, not just in a test, the API cannot update or delete the audit trail or immutable case columns. | Connecting as the owner and relying on the trigger alone. |
+| **D-41** | A frozen v1 case contract in `test/contract/case-v1.ts`, written by hand, non-strict, applied to every case response in the API tests. | Proves compatibility instead of promising it: adding a field passes, removing, renaming or retyping one fails. Derived from the code, it would change along with the bug. | The original exit criterion ("adding a field keeps assertions green"), which proved nothing. |
+| **D-40** | One error envelope `{ error: { code, message, details? } }` for every failure, including Zod validation (route default hook), unknown routes and readiness; stable `code` list in `src/http/errors.ts`. | Integrators branch on `code`; one shape means one error handler on their side. | `@hono/zod-openapi`'s default validation response and ad hoc bodies per route. |
+| **D-39** | Auth with `hono/jwt` (no new dependency): HS256, `iss`, `aud`, and `exp`, `sub`, `tenant_id`, `actor_type` required; `system` refused. Tokens come from `npm run dev:token`; the API has no issuing endpoint. The server refuses to start with `NODE_ENV=production` until a real mode exists. | The current use case is local development and tests; OIDC later is `verifyWithJwks` from the same library. | `jose`; an HTTP endpoint that mints tokens; trusting hono/jwt's optional `exp` check (2.21). |
+| **D-38** | **Drizzle**: schema in `src/infrastructure/db/schema` (constraints named as PostgreSQL names them), typed queries in the `CaseStore` adapter, drizzle-zod for request schemas, drizzle-kit `generate`/`check` (timestamp prefix, custom migrations for triggers, grants, `CONCURRENTLY`, reference data). **Our runner applies.** `0001`–`0010` kept as baseline; drift test and `db:schema:check` in CI. | Libraries before custom code, with the one verified gap kept custom: drizzle's migrator uses one transaction, no checksums, last-timestamp detection and no lock (2.20). | Hand-written SQL and no ORM (phases 0–2); drizzle-kit `migrate`; rewriting `0001`–`0010`. |
 | **D-37** | **Atomic commits from phase 3 on**: one logical change per commit, each green on its own, tests and docs with the code; imperative scoped titles that stand without the diff; bodies that give the reason and the `D-xx`/`NOTES` reference. Work is proposed as a commit plan approved once, and each commit is verified with `git rebase --exec`. Phases 0–2 stay as committed. | The history is a deliverable and must show how the system was built; small commits can be reviewed, bisected and reverted (2.19). | One commit per phase (what phases 0–2 did); rewriting the pushed history to hide it. |
 | **D-36** | `src/domain` is organised in **blocks** (`shared`, `money`, `deadline`, `rules`, `events`, `dispute`) with fixed file roles (`types`, `constants`, `schemas`, `errors`, `<action>`, `index`). ESLint enforces: import a block only via its `index.ts`; dependencies only in the direction `shared ← money, deadline ← rules ← events ← dispute`; Zod only in `events`. The aggregate block is `dispute`, not `case`, to avoid the reserved word. | You know where a thing lives before opening a file, and the architecture cannot erode silently. Zod stays in the domain for event metadata because that shape is an audit guarantee and duplicating Zod by hand buys nothing (2.18). | Folders by kind (`types/`, `functions/`…), which scatters one concept across four places; flat files (the phase 2 shape); conventions without lint. |
 | **D-35** | Scope: six phases (0–5); no console, no OIDC, no rules admin API, no voiding, no retroactive revisions. | The brief values a working result over breadth. | Seven phases with a console and full auth. |
@@ -380,12 +436,13 @@ rejected column.
 
 ## 4. What is deliberately unfinished at this stage
 
-Phases 0, 1 and 2 are complete. Recorded so the gaps are explicit rather than discovered by a
+Phases 0 to 3 are complete. Recorded so the gaps are explicit rather than discovered by a
 reviewer:
 
-- **No case API, no report, no sweeper yet.** They are phases 3 and 4 in
-  [`docs/PHASES.md`](./docs/PHASES.md). `src/application` and `src/worker` are empty; `src/domain`
-  is complete and pure, but nothing calls it yet.
+- **No stuck-queue report and no sweeper yet.** They are phase 4 in
+  [`docs/PHASES.md`](./docs/PHASES.md). Until the sweeper exists, an OPEN case whose deadline passes
+  stays OPEN in the projection; creating a case that is already late, and any transition on it,
+  already apply the deadline rule.
 - **The schema is real and tested**: append-only enforcement, the database clock, role privileges and
   the runner are covered by `test/schema.integration.test.ts` and `test/migrator.integration.test.ts`
   against throwaway databases.
@@ -393,6 +450,6 @@ reviewer:
   until then they are intentions.
 - **`deadline_tz = 'UTC'` is an assumption** to confirm against each scheme's rulebook.
 - **The FX table is a placeholder** for the exercise (TRADEOFFS §15).
-- The application still connects as the database owner locally. Phase 3 switches it to a login role
-  that is a member of `triple_app`; the privilege tests already use `SET ROLE triple_app`.
-- `TENANT_*` environment variables remain from phase 0 and will become a dev seed in phase 3.
+- **Auth is development-only.** Tokens are minted locally with a shared secret; the server refuses
+  to start in production until an OIDC mode exists.
+- **`tenant_rule_config` has no rows and no API.** Every tenant uses the default rule order.

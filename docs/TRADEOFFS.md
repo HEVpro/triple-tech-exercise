@@ -217,6 +217,29 @@ configurability the brief asks for exists, but its practical reach is small.
 
 ---
 
+## 13b. Drizzle: generate with drizzle-kit, apply with our runner
+
+**Decision.** Drizzle ORM for the schema and queries, drizzle-zod for request schemas, drizzle-kit to
+generate and check migrations. Our runner applies them.
+
+**Rejected.** Hand-written SQL everywhere (what phases 0–2 did), and drizzle-kit `migrate`.
+
+**Why.** Defining the schema once and deriving types, validation and migrations from it removes a
+whole class of drift. But drizzle's migrator, read in its source, runs every pending migration in
+one transaction (no `CREATE INDEX CONCURRENTLY`), detects pending migrations only from the last
+applied timestamp (edited files go unnoticed, out-of-order files are skipped), and takes no lock.
+Those four gaps are exactly what a migration against live data cannot afford, so only they are
+custom.
+
+**Cost.** Two tools around migrations instead of one, and drizzle-kit's devDependency carries four
+moderate advisories from esbuild's development server, which drizzle-kit does not run; the
+production tree audits clean.
+
+**What would reverse it.** A drizzle-kit release whose migrator supports per-migration transactions,
+checksums and a lock. Then the runner is deleted.
+
+---
+
 ## 14. Deliberate deviations from the brief
 
 1. **`amount_minor` in the database.** `amount_cents` is wrong for JPY (0 decimals) and KWD (3). The
@@ -238,7 +261,7 @@ Each is reversible at low cost.
 | --- | --- | --- |
 | FX | Static `fx_rates` seeded by migration | Rate source agreed with the business: scheme settlement rates versus the bank's provisioning rates, and how merchants and acquirers report |
 | Deadline zone | `UTC` default per window | Confirmed against each scheme's rulebook |
-| Auth | Locally minted HS256 tokens | OIDC with a JWKS, issuer and audience checked |
+| Auth | Locally minted HS256 tokens (`hono/jwt`) | OIDC with a JWKS via `hono/jwt`'s `verifyWithJwks`, no new dependency |
 | Retroactive rulings | Not implemented (`DEADLINE_REVISED` reserved) | Audited batch that appends events |
 | Voiding a case | Not implemented (`CASE_VOIDED` reserved) | Event-based soft delete, never a row delete |
 | Tamper evidence | Gapless `seq` | Optional hash chain across events |

@@ -18,7 +18,11 @@ If a change contradicts a decision, say so and update the register; do not silen
 
 ```bash
 npm run db:up            # PostgreSQL in Docker on port 5433
-npm run db:migrate       # apply migrations
+npm run db:migrate       # apply migrations (as the owner, MIGRATION_DATABASE_URL)
+npm run dev:seed         # API role triple_api + demo tenants acme (EUR), globex (USD)
+npm run dev:token        # print a dev bearer token
+npm run db:generate      # migration from a change to src/infrastructure/db/schema
+npm run db:schema:check  # fails if the schema changed without a migration
 npm run typecheck
 npm run lint             # zero warnings
 npm test                 # DB tests skip themselves if PostgreSQL is down
@@ -27,18 +31,21 @@ npm run lint:sql         # sqlfluff in Docker
 npm run format
 ```
 
-A change is done when `typecheck`, `lint`, `test:coverage`, `format:check` and, if SQL changed,
-`lint:sql` pass.
+A change is done when `typecheck`, `lint`, `test:coverage`, `format:check` and, if the schema or
+SQL changed, `db:schema:check` and `lint:sql` pass.
 
 ## Layers
 
 ```
 src/domain          pure logic in blocks (see Domain structure); no I/O, no clock (ESLint-enforced)
-src/application     use cases; depends on domain and ports
-src/infrastructure  PostgreSQL, migrations runner
-src/http            routes, schemas, auth, error mapping
+src/application     use cases, one transaction each; depends on domain and on ports (ports.ts),
+                    never on infrastructure (ESLint-enforced)
+src/infrastructure  Drizzle schema (db/schema), the CaseStore adapter (db/case-store.ts), pool,
+                    migration runner
+src/http            routes, request/response schemas (drizzle-zod + @hono/zod-openapi), auth,
+                    error envelope
 src/worker          deadline sweeper
-scripts/            CLIs only: migrate.ts, seed-perf.ts. Nothing else belongs here.
+scripts/            CLIs only: migrate, dev-seed, dev-token (+ dev-tenants), seed-perf. Nothing else.
 ```
 
 The domain receives `now` as an argument. It never reads a clock.
@@ -93,6 +100,20 @@ shared  <-  money, deadline  <-  rules  <-  events  <-  dispute
 **Adding a block:** create the folder with an `index.ts`, add one line to
 `DOMAIN_BLOCK_DEPENDENCIES` listing what it may import, and add it to the tree above.
 
+## Libraries before custom code
+
+The stack was chosen to be used: Hono (and its helpers, e.g. `hono/jwt`), `@hono/zod-openapi`, Zod,
+Drizzle ORM, drizzle-zod, drizzle-kit, pg, Pino, Vitest. **Do not reinvent what they already do.**
+
+Before writing custom infrastructure (a runner, a validator, a query helper, an auth check):
+
+1. **Check the library first**, in its current documentation (Context7) *and* in its installed
+   source when behaviour matters. Documentation describes intent; the source decides.
+2. **Write down the gap precisely**: which capability is missing, verified how (file and function).
+3. **Build only that gap**, as a thin layer on top of the library, and record it in the decision
+   register with the evidence. "It was easy to write" is not a reason.
+4. **If the gap closes in a later version**, delete the custom code.
+
 ## Non-negotiables
 
 - **Never update or delete `case_events`.** The database rejects it; do not work around it.
@@ -104,6 +125,11 @@ shared  <-  money, deadline  <-  rules  <-  events  <-  dispute
 - **Every write to `cases` writes an event in the same transaction**, with `seq = cases.version`.
 - **The API is additive only.** Do not rename or remove a response field; `amount_cents` stays.
 - **Never edit an applied migration.** Add a new one. Follow [`migrations/README.md`](./migrations/README.md).
+- **Never write a table change in SQL by hand.** Change `src/infrastructure/db/schema`, run
+  `npm run db:generate`, review the SQL. Hand-written SQL is only for what drizzle-kit cannot
+  express, via `npm run db:generate:custom`.
+- **Never query with raw SQL when Drizzle can express it.** `sql` fragments are for what the query
+  builder lacks (`now()`, `NULLS LAST`, `version + 1`).
 - **No `console`** in `src/`; use `logger()` from `src/logger.ts`. Inline `eslint-disable` is ignored
   by config.
 
@@ -115,6 +141,7 @@ shared  <-  money, deadline  <-  rules  <-  events  <-  dispute
 | `recorded_at` / `occurred_at` | `created_at` on events, `timestamp` |
 | `rule_key`: `deadline_passed`, `evidence_filed`, `scheme_outcome`, `default_open` | rule numbers in code |
 | `deadline_state`: `at_risk`, `responded`, `breached` | `overdue` |
+| `error.code` from the fixed list in `src/http/errors.ts` | free-text error strings |
 
 ## Conventions
 

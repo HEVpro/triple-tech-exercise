@@ -23,29 +23,170 @@ Nothing else is required: no global installs, no database client, no separate pa
 
 ---
 
-## Quick start
+## How to run it and call it
+
+Five minutes from a clean clone to a case moving through its lifecycle. Every command below is
+copy-paste; the only prerequisites are in [Requirements](#requirements).
+
+### 1. Install and start the database
 
 ```bash
-git clone <this-repo> triple-dispute
+git clone https://github.com/HEVpro/triple-tech-exercise.git triple-dispute
 cd triple-dispute
-
 cp .env.example .env
 npm install
 npm run db:up
+```
+
+`db:up` starts PostgreSQL 17 in Docker on port **5433** and waits until it is healthy.
+
+### 2. Create the schema and the demo data
+
+```bash
 npm run db:migrate
+npm run dev:seed
+```
+
+- `db:migrate` builds the schema as the database owner.
+- `dev:seed` creates **`triple_api`**, the restricted role the API connects as (it can read and
+  append, never update or delete the audit trail), and two demo banks:
+
+  | Tenant | `--tenant` | Base currency |
+  | --- | --- | --- |
+  | Acme Issuer | `acme` | EUR |
+  | Globex Bank | `globex` | USD |
+
+Both commands are idempotent: running them again changes nothing.
+
+### 3. Start the API
+
+```bash
 npm run dev
 ```
 
-Then:
+It listens on `http://localhost:3000`. The interactive reference is at
+[`http://localhost:3000/docs`](http://localhost:3000/docs).
+
+### 4. Get a token
+
+The API takes the tenant and the actor **only** from a signed bearer token. In development you mint
+one locally; there is no login endpoint.
 
 ```bash
-curl http://localhost:3000/healthz
-curl http://localhost:3000/readyz
-open http://localhost:3000/docs
+export TOKEN=$(npm run -s dev:token)
+export GLOBEX=$(npm run -s dev:token -- --tenant globex)
 ```
 
-`npm run db:up` blocks until PostgreSQL reports healthy, so by the time it returns the database is
-ready to accept connections.
+Options: `--tenant acme|globex`, `--actor human|agent`, `--sub <id>`, `--ttl <minutes>` (default 60).
+
+### 5. Call it
+
+A helper for dates, so the examples work on any day and any OS:
+
+```bash
+export PRESENTED=$(node -e "console.log(new Date(Date.now()-40*864e5).toISOString().slice(0,10))")
+```
+
+**Create a case** (review scenario 1: Visa, presented 40 days ago, about five days left):
+
+```bash
+curl -s -X POST http://localhost:3000/cases \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d "{\"external_ref\":\"ACME-2026-0001\",\"amount_cents\":125000,\"currency\":\"EUR\",\"scheme\":\"VISA\",\"reason_code\":\"10.4\",\"presentment_date\":\"$PRESENTED\"}"
+```
+
+`201` the first time; sending the same body again returns `200` with the same case (idempotent on
+`external_ref`).
+
+**Find it by your own reference**, and keep its id for the next calls:
+
+```bash
+curl -s "http://localhost:3000/cases?external_ref=ACME-2026-0001" -H "authorization: Bearer $TOKEN"
+export CASE_ID=$(curl -s "http://localhost:3000/cases?external_ref=ACME-2026-0001" -H "authorization: Bearer $TOKEN" | node -pe "JSON.parse(require('fs').readFileSync(0)).items[0].id")
+```
+
+**Fetch it by id:**
+
+```bash
+curl -s http://localhost:3000/cases/$CASE_ID -H "authorization: Bearer $TOKEN"
+```
+
+**File evidence** (the rules decide: allowed only before the deadline):
+
+```bash
+curl -s -X POST http://localhost:3000/cases/$CASE_ID/transitions \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"to":"UNDER_REVIEW","reason":"proof of delivery","evidence_refs":["DOC-881"]}'
+```
+
+**Record work** without changing the status:
+
+```bash
+curl -s -X POST http://localhost:3000/cases/$CASE_ID/notes \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"text":"requested proof of delivery from the merchant"}'
+```
+
+**Record the scheme's decision:**
+
+```bash
+curl -s -X POST http://localhost:3000/cases/$CASE_ID/transitions \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d "{\"to\":\"WON\",\"reason\":\"scheme ruled for the issuer\",\"scheme_decision_ref\":\"VROL-42\",\"scheme_decided_on\":\"$(node -e "console.log(new Date().toISOString().slice(0,10))")\"}"
+```
+
+**Read the history**, now or as of any earlier instant:
+
+```bash
+curl -s http://localhost:3000/cases/$CASE_ID/history -H "authorization: Bearer $TOKEN"
+curl -s "http://localhost:3000/cases/$CASE_ID/history?as_of=2026-01-01T00:00:00Z" -H "authorization: Bearer $TOKEN"
+```
+
+**Review scenario 2** (Mastercard, presented 50 days ago): the case is `LOST` the moment it is
+created, with a `DEADLINE_EXPIRED` event by the `system` actor dated at the deadline.
+
+```bash
+curl -s -X POST http://localhost:3000/cases \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d "{\"external_ref\":\"ACME-2026-0002\",\"amount_cents\":90000,\"currency\":\"EUR\",\"scheme\":\"MASTERCARD\",\"reason_code\":\"4853\",\"presentment_date\":\"$(node -e "console.log(new Date(Date.now()-50*864e5).toISOString().slice(0,10))")\"}"
+```
+
+**Money in another currency, for a USD bank:** the same euros, normalised to Globex's base
+currency (`amount_base_minor`, `base_currency: "USD"`):
+
+```bash
+curl -s -X POST http://localhost:3000/cases \
+  -H "authorization: Bearer $GLOBEX" -H 'content-type: application/json' \
+  -d "{\"external_ref\":\"GLOBEX-1\",\"amount_cents\":125000,\"currency\":\"EUR\",\"scheme\":\"VISA\",\"reason_code\":\"10.4\",\"presentment_date\":\"$PRESENTED\"}"
+```
+
+**Tenant isolation:** Globex cannot see Acme's case, and the answer is `404`, not `403`:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/cases/$CASE_ID -H "authorization: Bearer $GLOBEX"
+```
+
+**Errors** always have the same shape:
+
+```bash
+curl -s http://localhost:3000/cases/$CASE_ID
+# {"error":{"code":"unauthenticated","message":"a bearer token is required"}}
+```
+
+| Status | `error.code` |
+| --- | --- |
+| 400 | `validation_failed` (with `details`: one entry per invalid field) |
+| 401 | `unauthenticated` |
+| 403 | `tenant_not_found` |
+| 404 | `case_not_found`, `route_not_found` |
+| 409 | `rule_conflict` (with the rule that decided), `case_closed`, `external_ref_conflict` |
+| 422 | `not_an_action`, `unsupported_currency`, `presentment_in_future`, `response_window_missing` |
+
+### Starting over
+
+```bash
+npm run db:reset && npm run db:migrate && npm run dev:seed
+```
 
 ---
 
@@ -62,13 +203,18 @@ ready to accept connections.
 | `npm run lint` / `npm run lint:fix` | ESLint with type-aware rules, zero warnings allowed |
 | `npm run format` / `npm run format:check` | Prettier |
 | `npm run db:up` / `db:down` / `db:reset` | Start, stop, or recreate the database from scratch |
-| `npm run db:migrate` | Apply pending migrations |
+| `npm run db:migrate` | Apply pending migrations, as the schema owner |
 | `npm run db:migrate:status` | List applied and pending migrations |
+| `npm run db:generate` | Generate a migration from a change to `src/infrastructure/db/schema` (drizzle-kit) |
+| `npm run db:generate:custom -- --name <name>` | Empty migration for what drizzle-kit cannot express (triggers, grants, `CONCURRENTLY`, reference data) |
+| `npm run db:schema:check` | Fail if the TypeScript schema changed without a migration |
+| `npm run dev:seed` | Create the API role `triple_api` and the two demo tenants (idempotent) |
+| `npm run dev:token` | Print a development bearer token (`--tenant`, `--actor`, `--sub`, `--ttl`) |
 | `npm run lint:sql` | sqlfluff 4.4.0 inside Docker |
 | `npm run scan:secrets` | gitleaks 8.30.1 inside Docker, over the full git history |
 
-`scripts/` holds only command-line entry points: `migrate.ts` today, the performance fixture
-generator in phase 5.
+`scripts/` holds only command-line entry points: `migrate.ts`, `dev-seed.ts` and `dev-token.ts`
+(with the shared `dev-tenants.ts`), and the performance fixture generator in phase 5.
 
 ---
 
@@ -85,17 +231,19 @@ OpenAPI definition, so the contract cannot drift from the implementation.
 | `GET` | `/metrics` | Prometheus metrics. | done |
 | `GET` | `/docs` | Interactive API reference. | done |
 | `GET` | `/docs/openapi.json` | Raw OpenAPI 3.1 document. | done |
-| `POST` | `/cases` | Create a case, idempotent on `external_ref` | 3 |
-| `GET` | `/cases/:id` | Current state | 3 |
-| `GET` | `/cases?external_ref=` | Look up by the bank's own id | 3 |
-| `POST` | `/cases/:id/transitions` | `{ to, reason }`, decided by the terminal rules | 3 |
-| `POST` | `/cases/:id/notes` | Record work done on a case | 3 |
-| `GET` | `/cases/:id/history?as_of=` | The case as recorded at an instant, with its events | 3 |
+| `POST` | `/cases` | Create a case, idempotent on `external_ref` | done |
+| `GET` | `/cases/:id` | Current state | done |
+| `GET` | `/cases?external_ref=` | Look up by the bank's own id | done |
+| `POST` | `/cases/:id/transitions` | `{ to, reason, … }`, decided by the terminal rules | done |
+| `POST` | `/cases/:id/notes` | Record work done on a case | done |
+| `GET` | `/cases/:id/history?as_of=` | The case as recorded at an instant, with its events | done |
 | `GET` | `/reports/stuck-queue` | At-risk and breached cases, ordered by money | 4 |
 
-Paths are unversioned because banks already consume `GET /cases/:id`; changes are additive only.
-The API accepts and returns `amount_cents`, the brief's field, alongside `amount_minor`. The full
-contract is in [`docs/DOMAIN.md`](./docs/DOMAIN.md#http-contract).
+Paths are unversioned because banks already consume `GET /cases/:id`; changes are additive only,
+and `test/contract/case-v1.ts` fails the build if a published field is removed, renamed or retyped.
+The API accepts and returns `amount_cents`, the brief's field, alongside `amount_minor`. Every
+`/cases` route needs a bearer token; see [How to run it and call it](#how-to-run-it-and-call-it).
+The full contract is in [`docs/DOMAIN.md`](./docs/DOMAIN.md#http-contract).
 
 ### Examples
 
@@ -116,9 +264,9 @@ The codebase is layered, and the boundaries are enforced by the linter rather th
 src/
   domain/          Pure business logic. No database, no HTTP, no runtime globals.
                    Enforced by no-restricted-imports: importing pg, hono or pino here is a lint error.
-  application/     Use cases. Orchestrates the domain and depends on ports, not adapters.
-  infrastructure/  Postgres, connection pool, schema access, external clients.
-  http/            Hono routes, OpenAPI schemas, auth middleware, error mapping.
+  application/     Use cases, one transaction each. Depends on ports (CaseStore), never adapters.
+  infrastructure/  Drizzle schema and queries (the CaseStore adapter), pool, migration runner.
+  http/            Hono routes, Zod/OpenAPI schemas (drizzle-zod), auth, error envelope.
   worker/          The deadline sweeper.
 ```
 
@@ -147,7 +295,7 @@ an import that goes the other way or reaches into a block's internal file. The c
 The full register, with rejected alternatives, is in [`NOTES.md`](./NOTES.md).
 
 **[`docs/PHASES.md`](./docs/PHASES.md)** — the delivery phases, what each one delivers and its exit
-criteria. Phases 0, 1 and 2 are complete.
+criteria. Phases 0 to 3 are complete.
 
 **[`docs/DOMAIN.md`](./docs/DOMAIN.md)** — states, terminal rules, entities, flows, invariants and use
 cases, written to be read without reading the code.
@@ -173,7 +321,11 @@ The decisions that shape the code most:
   half-open interval.
 - **The contract banks already use is kept**: `/cases/:id`, and `amount_cents` in the API even though
   the column is `amount_minor`, because the brief's field name is wrong for JPY and KWD.
-- **The tenant comes only from the verified token.**
+- **The tenant comes only from the verified token**, and the API connects to PostgreSQL as
+  `triple_api`, a role that cannot update or delete the audit trail.
+- **Libraries before custom code.** Drizzle defines the schema and the queries, drizzle-zod the
+  request schemas, drizzle-kit generates migrations; only what they verifiably cannot do is custom,
+  such as applying migrations (D-38).
 
 ---
 
@@ -194,8 +346,14 @@ in UTC with `data-checksums` enabled.
 
 ### Migrations
 
-Hand-written SQL in `migrations/`, applied in filename order by `npm run db:migrate`. The rules are
-in [`migrations/README.md`](./migrations/README.md).
+The schema is defined once, in `src/infrastructure/db/schema` (Drizzle). drizzle-kit **generates**
+the SQL migrations from it into `migrations/`; what it cannot express (the append-only trigger,
+grants, `CONCURRENTLY` indexes, reference data) is written by hand as a drizzle-kit custom
+migration. Our runner **applies** them, because drizzle's own migrator runs every pending
+migration in one transaction, has no checksums and no lock (D-38). `0001`–`0010` predate drizzle-kit
+and are kept as written; `test/schema-drift.integration.test.ts` proves the TypeScript schema
+builds the same tables, columns and constraints. The rules are in
+[`migrations/README.md`](./migrations/README.md).
 
 The runner records a SHA-256 per migration and refuses to run if an applied file changed, holds an
 advisory lock so two deploys cannot migrate at once, sets `lock_timeout` so a transactional migration
@@ -267,21 +425,20 @@ both layout and semantic rules for `migrations/`; Prettier does not format SQL. 
 ## Configuration
 
 All configuration is environment-based and validated with Zod at startup, so a missing or malformed
-variable fails immediately with a precise message instead of surfacing as a runtime error later.
-
-Copy `.env.example` to `.env`. The scripts load it automatically via Node's
-`--env-file-if-exists`, so nothing extra is needed to run them.
+variable fails immediately with a precise message. Copy `.env.example` to `.env`; the scripts load it
+automatically.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `PORT` | `3000` | |
 | `LOG_LEVEL` | `info` | `debug` in the example file |
-| `DATABASE_URL` | `postgres://triple:triple@localhost:5433/triple` | |
+| `DATABASE_URL` | — | The API's connection, as `triple_api` (read and append only) |
+| `MIGRATION_DATABASE_URL` | — | The owner's connection, for `db:migrate`, `dev:seed` and tests |
 | `DATABASE_POOL_MAX` | `10` | |
-| `AUTH_MODE` | `dev` | `dev` or `oidc` |
-| `JWT_ISSUER` / `JWT_AUDIENCE` / `JWT_JWKS_URL` | — | Verified on every request |
-| `SWEEP_INTERVAL_MS` | `60000` | Deadline sweeper period |
-| `TENANT_ID` / `TENANT_NAME` / `TENANT_TIMEZONE` / `TENANT_BASE_CURRENCY` | — | Seed values for the single-tenant hypothesis; the time zone is for display only |
+| `AUTH_MODE` | `dev` | The only mode. The server refuses to start with `NODE_ENV=production` |
+| `JWT_SECRET` | — | HS256 secret, at least 32 characters |
+| `JWT_ISSUER` / `JWT_AUDIENCE` | — | Checked on every request |
+| `SWEEP_INTERVAL_MS` | `60000` | Deadline sweeper period (phase 4) |
 
 ---
 
@@ -300,9 +457,15 @@ lsof -ti:5433 | xargs kill    # or change ports in docker-compose.yml and .env
 lsof -ti:3000 | xargs kill
 ```
 
-**`readyz` returns 503**
+**`readyz` returns 503, or every call fails with `password authentication failed for user "triple_api"`**
 
-PostgreSQL is not reachable. Check `docker ps` for `triple-postgres` and run `npm run db:up`.
+PostgreSQL is not reachable, or the API role does not exist yet. Check `docker ps` for
+`triple-postgres`, then run `npm run db:up && npm run db:migrate && npm run dev:seed`.
+
+**Every `/cases` call returns 401**
+
+The token is missing or expired (default TTL 60 minutes), or `.env` changed since it was minted.
+Mint a new one with `export TOKEN=$(npm run -s dev:token)`.
 
 **`Cannot find package 'vite'`**
 
@@ -313,8 +476,10 @@ so a clean `npm install` resolves it; if node_modules is in a strange state, rem
 
 ## Project status
 
-Phases 0, 1 and 2 of 0–5 are complete: toolchain and gates, the schema, the migration runner, the
-live-data plan, and the domain core (rules, deadlines, money, events, history). What is deliberately unfinished is listed in [`NOTES.md`](./NOTES.md) section 4.
+Phases 0 to 3 of 0–5 are complete: toolchain and gates, the schema and migration runner with the
+live-data plan, the domain core, and the case API with development auth and tenant isolation. Next
+is phase 4, the stuck-queue report and the deadline sweeper. What is deliberately unfinished is
+listed in [`NOTES.md`](./NOTES.md) section 4.
 
 | Document | Contents |
 | --- | --- |
@@ -324,4 +489,4 @@ live-data plan, and the domain core (rules, deadlines, money, events, history). 
 | [`docs/MIGRATION_PLAN.md`](./docs/MIGRATION_PLAN.md) | Migrations against live data for 60+ tenants |
 | [`NOTES.md`](./NOTES.md) | How AI was used, failed prompts, decision register, open gaps |
 | [`AGENTS.md`](./AGENTS.md) | Rules for coding agents |
-| [`migrations/README.md`](./migrations/README.md) | Migration conventions and the runner |
+| [`migrations/README.md`](./migrations/README.md) | Migration conventions, drizzle-kit workflow and the runner |
