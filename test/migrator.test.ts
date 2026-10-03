@@ -64,6 +64,8 @@ describe('loading migrations from disk', () => {
       'cases_at_risk_index',
       'cases_breached_index',
       'cases_sweep_index',
+      'cases_queue_index',
+      'cases_queue_breached_index',
     ])
   })
 })

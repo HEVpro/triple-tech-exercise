@@ -117,3 +117,5 @@ short and read in review, and their behaviour is covered by the migration and sc
 | `20261003021001_drizzle_baseline.sql` | drizzle-kit baseline; applies nothing | transactional |
 | `20261003021327_usd_fx_rates.sql` | Fixed rates for USD-based tenants (custom, reference data) | transactional |
 | `20261003030712_drop_rule_enabled.sql` | Drop the invented per-rule switch (generated; contract step) | transactional |
+| `20261003031106_cases_queue_index.sql` | Report index covering `id` (expand; replaces `cases_at_risk_idx`) | no transaction |
+| `20261003031107_cases_queue_breached_index.sql` | Breached part, covering `id` (expand; replaces `cases_breached_idx`) | no transaction |

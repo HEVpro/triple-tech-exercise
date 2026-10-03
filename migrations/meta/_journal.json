@@ -22,6 +22,20 @@
       "when": 1790996832765,
       "tag": "20261003030712_drop_rule_enabled",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790997066216,
+      "tag": "20261003031106_cases_queue_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790997067693,
+      "tag": "20261003031107_cases_queue_breached_index",
+      "breakpoints": true
     }
   ]
 }

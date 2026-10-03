@@ -105,6 +105,8 @@ describe.skipIf(!available)('migration runner against a real database', () => {
     expect(result.rows.map((row) => row.indexname)).toEqual([
       'cases_at_risk_idx',
       'cases_breached_idx',
+      'cases_queue_breached_idx',
+      'cases_queue_idx',
       'cases_sweep_idx',
     ])
     const invalid = await pool.query('SELECT 1 FROM pg_index WHERE NOT indisvalid')
