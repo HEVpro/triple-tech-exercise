@@ -1,45 +1,62 @@
 # Migrations
 
-One file per migration, applied in lexicographic order. Filenames are zero padded so ordering is
-obvious to a reviewer reading `git log` on this directory.
+Hand-written PostgreSQL, applied in filename order by `npm run db:migrate`
+(`src/infrastructure/db/migrator.ts`, CLI in `scripts/migrate.ts`). Status with
+`npm run db:migrate:status`.
 
 ```
 NNNN_snake_case_description.sql
 ```
 
+The rollout plan for live data is in [`../docs/MIGRATION_PLAN.md`](../docs/MIGRATION_PLAN.md).
+
 ## Rules
 
-1. **Plain `.sql`, never generated DSL.** A regulator has to be able to read what runs against
-   production without trusting our application code.
-2. **Every migration must be safe while the previous version of the app is still serving traffic.**
-   That means expand / migrate / contract as three separate deploys, never one. See
-   `docs/MIGRATION_PLAN.md`.
-3. **Never `ALTER COLUMN TYPE`.** Add a column, backfill in batches, swap reads, drop the old one in
-   a later migration.
-4. **Never `SET NOT NULL` in one step.** Add `CHECK (...) NOT VALID`, `VALIDATE CONSTRAINT`, then
-   `SET NOT NULL`.
-5. **No table or column rewrite that takes an `ACCESS EXCLUSIVE` lock for longer than a few
-   milliseconds on a large table.**
+1. **Plain SQL, never generated.** A regulator has to be able to read what runs against production.
+2. **Safe while the previous app version serves traffic.** Expand, migrate, contract as separate
+   releases.
+3. **Never `ALTER COLUMN TYPE`.** Add a column, backfill in batches, switch reads, drop later.
+4. **Never `SET NOT NULL` in one step.** `CHECK … NOT VALID`, `VALIDATE CONSTRAINT`, then `SET NOT NULL`.
+5. **Indexes on existing tables are built `CONCURRENTLY`.**
+6. **Never edit an applied migration.** The runner compares SHA-256 checksums and refuses to run.
+   Fix forward in a new file.
+7. **Forward only.** There is no `down` command. Every file states its rollback, or that it is
+   irreversible and why, in its header comment.
+8. **Name constraints explicitly** (`<table>_<column>_check`), so a future migration can drop or
+   replace them by name.
 
-## Transaction control
+## What the runner does
 
-`CREATE INDEX CONCURRENTLY` and `CONCURRENTLY` index drops **cannot run inside a transaction**. The
-migration runner therefore has to support per-migration transaction control. That is decision
-**D-14** and it is a property of the runner, not of an individual migration file: the convention below
-lets a migration opt out of the transaction without changing the runner later.
+- Takes a PostgreSQL advisory lock, so two deploys cannot run migrations at the same time.
+- Records each migration in `schema_migrations` with its checksum, mode and duration.
+- Sets `lock_timeout = 5s` on every migration, so a migration that cannot get its lock fails instead
+  of queueing in front of live traffic. Files do not need to set it.
+- Runs each migration in its own transaction, **unless** the file starts with:
 
-A migration opts out by starting with this marker:
+  ```sql
+  -- migrate:no-transaction
+  ```
 
-```sql
--- migrate:no-transaction
-```
+  `CREATE INDEX CONCURRENTLY` cannot run inside a transaction (D-14). Such a file must contain exactly
+  one statement, because several statements sent together run as an implicit transaction. After it
+  runs, the runner fails if any invalid index was left behind; drop it and re-run.
 
-Until phase 1 lands the runner, do not rely on this. When the runner arrives, the convention above
-is what it will read, and every concurrent index migration must use it.
+## Lint
 
-## Idempotency
+`npm run lint:sql` runs sqlfluff 4.4.0 in Docker. sqlfluff owns SQL layout and semantics; Prettier
+does not touch `.sql` files.
 
-Migrations are not wrapped in retry logic and are not expected to be re-runnable. The runner records
-what has been applied; if a migration fails, fix it forward in a new file rather than editing an
-applied one. The only exception is `CREATE INDEX IF NOT EXISTS` and friends, used deliberately where
-a retry is safe.
+## Current migrations
+
+| File | Contents | Mode |
+| --- | --- | --- |
+| `0001_app_role.sql` | `triple_app` role, no `DELETE` anywhere | transactional |
+| `0002_tenants.sql` | Banks | transactional |
+| `0003_response_windows.sql` | Windows per scheme and reason code, brief defaults seeded | transactional |
+| `0004_fx_rates.sql` | Fixed rates for base-currency ordering | transactional |
+| `0005_cases.sql` | The projection; column-level `UPDATE` grant | transactional |
+| `0006_case_events.sql` | The log; append-only trigger, DB clock, `ON DELETE RESTRICT` | transactional |
+| `0007_tenant_rule_config.sql` | Rule order and enablement per tenant | transactional |
+| `0008_cases_at_risk_index.sql` | Report index, at-risk part | no transaction |
+| `0009_cases_breached_index.sql` | Report index, breached part | no transaction |
+| `0010_cases_sweep_index.sql` | Sweeper index | no transaction |

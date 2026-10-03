@@ -48,9 +48,16 @@ jobs:
 
       - run: npm run lint
 
-      - run: npm run test
+      - name: Apply migrations to the service database, twice, to prove idempotency
+        env:
+          DATABASE_URL: postgres://triple:triple@localhost:5433/triple
+        run: |
+          npm run db:migrate
+          npm run db:migrate
+          npm run db:migrate:status
 
-      - run: npm run test:coverage
+      - name: Test with coverage thresholds
+        run: npm run test:coverage
 
       - run: npm run build
 

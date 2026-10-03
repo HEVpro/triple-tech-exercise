@@ -3,6 +3,9 @@ dialect = postgres
 templater = raw
 max_line_length = 100
 # Prettier does not format SQL, so sqlfluff owns both layout and semantics for migrations/.
+# RF04 is excluded: `name` and `version` are clear column names that happen to be
+# non-reserved keywords in Postgres; quoting or renaming them would make the schema worse.
+exclude_rules = RF04
 
 [sqlfluff:indentation]
 tab_space_size = 2
