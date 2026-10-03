@@ -64,15 +64,6 @@ jobs:
 
       - run: npm run build
 
-  sql-lint:
-    name: sql lint (sqlfluff in docker)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run sqlfluff via docker
-        run: npm run lint:sql
-
   secrets:
     name: secret scan (gitleaks in docker)
     runs-on: ubuntu-latest

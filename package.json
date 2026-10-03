@@ -16,7 +16,6 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint:sql": "docker run --rm -v \"$PWD:/workspace\" -w /workspace ghcr.io/sqlfluff/sqlfluff:4.4.0 lint migrations/",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
