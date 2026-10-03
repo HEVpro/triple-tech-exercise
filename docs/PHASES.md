@@ -4,7 +4,7 @@ Each phase leaves the repository working with its gates green. The plan was cut 
 six (0 to 5) after a scope review: the console, OIDC and effective-dated windows were dropped or
 deferred (NOTES 2.13).
 
-Current status: **phases 0 and 1 complete.**
+Current status: **phases 0, 1 and 2 complete.**
 
 ---
 
@@ -14,8 +14,8 @@ Current status: **phases 0 and 1 complete.**
 | --- | --- | --- | --- |
 | 0 | Repository, toolchain, gates, PostgreSQL container | Can a reviewer run this at all | done |
 | 1 | Schema, migration runner, migration plan | Can we change live data safely; is the audit trail enforced by the database | done |
-| 2 | Domain core: money, deadline, rules, events | Is the business logic correct and auditable | next |
-| 3 | Case API with dev auth and tenant isolation | Do we keep the bank contract and reconstruct history truthfully | |
+| 2 | Domain core: money, deadline, rules, events | Is the business logic correct and auditable | done |
+| 3 | Case API with dev auth and tenant isolation | Do we keep the bank contract and reconstruct history truthfully | next |
 | 4 | Stuck-queue report and deadline sweeper | Do we find the money before the deadline does | |
 | 5 | Performance evidence and SLOs | Does it hold at scale, measured | |
 
@@ -55,21 +55,31 @@ secret scanning moved to gitleaks (D-32).
 
 ---
 
-## Phase 2: Domain core
+## Phase 2: Domain core — done
 
-Pure TypeScript in `src/domain`, no database, no HTTP.
+Pure TypeScript in `src/domain`, no database, no HTTP, no clock.
 
-- `money.ts`: ISO 4217 exponents, `amount_minor` ↔ `amount_cents`, base-currency conversion with a
-  snapshotted rate, no floating point on amounts.
-- `deadline.ts`: end of day `presentment_date + window_days` in the window's zone; the single
-  half-open `isWithinDeadline`.
-- `events.ts`: the closed `CaseEvent` union with per-type metadata schemas and the 16 KB cap.
-- `rules.ts`: the four rules, each returning status and `rule_key`; tenant order applied.
-- `case.ts`: transition decision (`to` → event or rejection with the deciding rule); history fold.
+- `status.ts`: the four states; `WON` and `LOST` are absorbing.
+- `money.ts`: explicit ISO 4217 exponent table (an unknown currency is rejected, not assumed to have
+  two decimals); base-currency conversion in `bigint`, rounding half up.
+- `deadline.ts`: end of day `presentment_date + window_days` in the window's zone, by calendar
+  arithmetic, DST-safe, including zones where midnight is skipped; the single half-open
+  `isWithinDeadline`.
+- `events.ts`: the closed event union with strict per-type metadata schemas; the type encodes that
+  only a note has no deciding rule, and only the system expires a deadline.
+- `rules.ts`: the three configurable predicates plus `default_open`, `RULESET_VERSION`, and the
+  tenant order from `tenant_rule_config`.
+- `case.ts`: `decideCreation` (expires at once if already late), `decideTransition` (accepted, no-op
+  or rejected with the deciding rule), `decideSweep`, `decideNote`, `foldHistory`,
+  `projectionMatchesLog`.
 
-**Exit criteria:** every rule tested at the boundary (exactly at the deadline, 1 ms before, 1 ms
-after); the normal path "evidence in time, outcome after the deadline → WON" is a test; the history
-fold is tested to ignore rule changes.
+ESLint now also forbids reading the clock or `Math.random()` in `src/domain`, and coverage for
+`src/domain/**` is held to 100% of lines and functions.
+
+**Exit criteria, met:** every rule tested exactly at the deadline and 1 ms either side; the normal
+path "evidence in time, outcome after the deadline → WON" is a test; history is tested to report a
+stored decision that today's rules would not make; scenarios 1 and 2 and a 400-event fold are
+tested at the domain level.
 
 ---
 

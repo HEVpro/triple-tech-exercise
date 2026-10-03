@@ -280,6 +280,23 @@ holds a transaction open for 6 s and asserts the build waits instead of failing.
 scratch (D-34); a live database with a legacy `cases` table would need a dedicated baseline
 migration, and the runner now says so instead of failing in the middle.
 
+### 2.17 Tests that passed without proving their claim
+
+Two domain tests were green on the first run and still wrong, caught on re-reading them rather
+than by any tool:
+
+- **"orders money, not minor units"** compared a KWD and a JPY amount whose raw minor units and
+  converted values sorted the *same* way, so it would have passed with the bug it claimed to rule
+  out. It now uses ¥30 000 against €200.00, where raw minor units and money disagree.
+- **"history never re-evaluates rules"** asserted the arity of `foldHistory`. A structural check,
+  not behaviour. It now folds a stored `WON` that today's rules would turn into `LOST`, and asserts
+  history still says `WON`.
+
+The coverage gate found a third issue in production code rather than tests: wall-clock parsing in
+`deadline.ts` fell back to `0` for a missing date part, which would have produced a wrong deadline
+silently. It now throws. The domain's statements threshold is 99%, not 100%, because that throw
+cannot be reached without mocking `Intl`.
+
 ---
 
 ## 3. Decision register
@@ -330,10 +347,12 @@ rejected column.
 
 ## 4. What is deliberately unfinished at this stage
 
-Phases 0 and 1 are complete. Recorded so the gaps are explicit rather than discovered by a reviewer:
+Phases 0, 1 and 2 are complete. Recorded so the gaps are explicit rather than discovered by a
+reviewer:
 
-- **No domain code, no case API, no report, no sweeper yet.** They are phases 2 to 4 in
-  [`docs/PHASES.md`](./docs/PHASES.md). `src/domain`, `src/application` and `src/worker` are empty.
+- **No case API, no report, no sweeper yet.** They are phases 3 and 4 in
+  [`docs/PHASES.md`](./docs/PHASES.md). `src/application` and `src/worker` are empty; `src/domain`
+  is complete and pure, but nothing calls it yet.
 - **The schema is real and tested**: append-only enforcement, the database clock, role privileges and
   the runner are covered by `test/schema.integration.test.ts` and `test/migrator.integration.test.ts`
   against throwaway databases.

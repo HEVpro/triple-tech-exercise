@@ -102,6 +102,23 @@ export default defineConfig(
           ],
         },
       ],
+      // The domain receives `now` as an argument. Reading a clock here would make decisions
+      // untestable at the boundary and different on every app instance.
+      'no-restricted-syntax': [
+        'error',
+        {
+          message: 'src/domain must not read the clock: take `now` as a parameter.',
+          selector: "NewExpression[callee.name='Date'][arguments.length=0]",
+        },
+        {
+          message: 'src/domain must not read the clock: take `now` as a parameter.',
+          selector: "CallExpression[callee.object.name='Date'][callee.property.name='now']",
+        },
+        {
+          message: 'src/domain must be deterministic.',
+          selector: "CallExpression[callee.object.name='Math'][callee.property.name='random']",
+        },
+      ],
     },
   },
 

@@ -1,8 +1,10 @@
 # Domain Model
 
 How a dispute case behaves, written so it can be read without reading the code. The schema that
-enforces it is in [`../migrations`](../migrations) (phase 1). The pure TypeScript rules arrive in
-`src/domain` in phase 2.
+enforces it is in [`../migrations`](../migrations) (phase 1); the rules themselves are pure
+TypeScript in [`../src/domain`](../src/domain) (phase 2). The domain never reads a clock: every
+decision takes `now` as an argument, and ESLint rejects `new Date()`, `Date.now()` and
+`Math.random()` there. Time-zone arithmetic uses the runtime's `Intl` time-zone data.
 
 Trade-offs and rejected alternatives are in [`TRADEOFFS.md`](./TRADEOFFS.md). Decision IDs (`D-n`)
 refer to the register in [`../NOTES.md`](../NOTES.md) section 3.
@@ -162,10 +164,10 @@ without gaps, and a gap would reveal a deleted event.
 
 | `event_type` | Actor | Status change | `metadata` | Why it exists |
 | --- | --- | --- | --- | --- |
-| `CASE_CREATED` | human / agent | → `OPEN` | `{ source }` | Start of the trail. |
+| `CASE_CREATED` | human / agent | → `OPEN` | `{ source: "api" }` | Start of the trail. |
 | `EVIDENCE_FILED` | human / agent | `OPEN` → `UNDER_REVIEW` | `{ evidence_refs[] }` (references, never files) | Rule 2. |
 | `SCHEME_OUTCOME_RECORDED` | human / agent | `OPEN` / `UNDER_REVIEW` → `WON` / `LOST` | `{ outcome, scheme_decision_ref, scheme_decided_on }` | Rule 3. |
-| `DEADLINE_EXPIRED` | system | `OPEN` → `LOST` | `{ deadline_at, window_days, sweep_run_id }` | Rule 1. `occurred_at = deadline_at`. |
+| `DEADLINE_EXPIRED` | system | `OPEN` → `LOST` | `{ deadline_at, window_days, detected_by: creation \| sweeper, sweep_run_id? }` | Rule 1. `occurred_at = deadline_at`. |
 | `NOTE_ADDED` | human / agent | none (`from = to`) | `{ text }` ≤ 2 KB, no personal data by policy | See below. |
 
 **Why `NOTE_ADDED`.** The brief asks "who or what changed it". Status events only say *when* the
@@ -326,20 +328,24 @@ The brief's filter is kept verbatim for `at_risk` and `responded`; `breached` is
 
 ## Invariants
 
-Each is a property a test asserts, not a comment. The schema-level ones are already tested in
-`test/schema.integration.test.ts`.
+Each is a property a test asserts, not a comment. Schema-level ones are tested in
+`test/schema.integration.test.ts`, domain-level ones in `test/domain/`.
 
 1. `case_events` is append-only. *(schema: grants, trigger, FK — tested)*
 2. Every event has an actor; `system` only for `DEADLINE_EXPIRED`. *(schema — tested)*
 3. `cases.status` equals the `to_status` of the case's last event, and `cases.version` equals its
-   highest `seq`. Checkable for the whole table with one query.
+   highest `seq`. Checkable for the whole table with one query. *(domain: `projectionMatchesLog` —
+   tested)*
 4. `deadline_at` and the window snapshot are set at creation and never change in v1. *(schema:
    column grant — tested)*
 5. Reading history never evaluates a rule. It folds stored events with `recorded_at <= as_of`, by
-   `seq`.
+   `seq`. *(domain: `foldHistory` takes no rules; tested with a decision today's rules would not
+   make)*
 6. In-window is `instant < deadline_at`, half-open, defined once in `src/domain/deadline.ts`.
+   *(domain: 1 ms before, at, and after — tested)*
 7. A tenant comes from the verified claim only. A cross-tenant read returns `404`, not `403`.
-8. Money is integer minor units plus a currency. No floating point touches an amount.
+8. Money is integer minor units plus a currency. No floating point touches an amount. *(domain:
+   `bigint` throughout `money.ts` — tested)*
 9. Every write to `cases` writes an event in the same transaction, with `seq = version`.
 10. `recorded_at` is the database clock; clients cannot backdate. *(schema: trigger + check — tested)*
 

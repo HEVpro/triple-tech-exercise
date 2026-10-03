@@ -131,7 +131,7 @@ to review.
 The full register, with rejected alternatives, is in [`NOTES.md`](./NOTES.md).
 
 **[`docs/PHASES.md`](./docs/PHASES.md)** — the delivery phases, what each one delivers and its exit
-criteria. Phases 0 and 1 are complete.
+criteria. Phases 0, 1 and 2 are complete.
 
 **[`docs/DOMAIN.md`](./docs/DOMAIN.md)** — states, terminal rules, entities, flows, invariants and use
 cases, written to be read without reading the code.
@@ -297,8 +297,8 @@ so a clean `npm install` resolves it; if node_modules is in a strange state, rem
 
 ## Project status
 
-Phases 0 and 1 of 0–5 are complete: toolchain and gates, the schema, the migration runner and the
-live-data plan. What is deliberately unfinished is listed in [`NOTES.md`](./NOTES.md) section 4.
+Phases 0, 1 and 2 of 0–5 are complete: toolchain and gates, the schema, the migration runner, the
+live-data plan, and the domain core (rules, deadlines, money, events, history). What is deliberately unfinished is listed in [`NOTES.md`](./NOTES.md) section 4.
 
 | Document | Contents |
 | --- | --- |

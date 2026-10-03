@@ -11,6 +11,14 @@ export default defineConfig({
         branches: 60,
         functions: 80,
         lines: 85,
+        // The business rules are the part a regulator audits; they are held to a higher bar.
+        'src/domain/**': {
+          branches: 95,
+          functions: 100,
+          lines: 100,
+          // One defensive throw in deadline.ts cannot be reached without mocking Intl.
+          statements: 99,
+        },
         statements: 85,
       },
     },
