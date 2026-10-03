@@ -3,7 +3,8 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     coverage: {
-      exclude: ['src/index.ts', 'test/**'],
+      // Process entry points: wiring only, exercised by running them.
+      exclude: ['src/index.ts', 'src/worker/main.ts', 'test/**'],
       include: ['src/**/*.ts'],
       provider: 'v8',
       reporter: ['text', 'lcov'],
