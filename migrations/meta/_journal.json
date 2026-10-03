@@ -8,6 +8,13 @@
       "when": 1790993401016,
       "tag": "20261003021001_drizzle_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790993607820,
+      "tag": "20261003021327_usd_fx_rates",
+      "breakpoints": true
     }
   ]
 }

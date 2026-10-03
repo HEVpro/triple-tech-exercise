@@ -114,3 +114,4 @@ does not touch `.sql` files.
 | `0009_cases_breached_index.sql` | Report index, breached part | no transaction |
 | `0010_cases_sweep_index.sql` | Sweeper index | no transaction |
 | `20261003021001_drizzle_baseline.sql` | drizzle-kit baseline; applies nothing | transactional |
+| `20261003021327_usd_fx_rates.sql` | Fixed rates for USD-based tenants (custom, reference data) | transactional |
