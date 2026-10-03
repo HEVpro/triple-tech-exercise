@@ -1,11 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import { Pool } from 'pg'
 
-const adminUrl = process.env['DATABASE_URL'] ?? 'postgres://triple:triple@localhost:5433/triple'
+// Throwaway databases are created and migrated as the schema owner.
+const adminUrl =
+  process.env['MIGRATION_DATABASE_URL'] ?? 'postgres://triple:triple@localhost:5433/triple'
 
 export interface TempDatabase {
   drop: () => Promise<void>
   pool: Pool
+  // Owner connection string of the throwaway database.
+  url: string
 }
 
 // Every suite gets its own throwaway database, so migration tests always start from empty
@@ -26,6 +30,7 @@ export async function createTempDatabase(): Promise<TempDatabase> {
       await admin.end()
     },
     pool,
+    url: url.toString(),
   }
 }
 

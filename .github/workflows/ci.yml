@@ -53,7 +53,7 @@ jobs:
 
       - name: Apply migrations to the service database, twice, to prove idempotency
         env:
-          DATABASE_URL: postgres://triple:triple@localhost:5433/triple
+          MIGRATION_DATABASE_URL: postgres://triple:triple@localhost:5433/triple
         run: |
           npm run db:migrate
           npm run db:migrate

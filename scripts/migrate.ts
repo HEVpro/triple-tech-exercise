@@ -12,10 +12,11 @@ const out = process.stdout.write.bind(process.stdout)
 const fail = process.stderr.write.bind(process.stderr)
 
 const command = z.enum(['status', 'up']).safeParse(process.argv[2])
-const databaseUrl = z.url().safeParse(process.env['DATABASE_URL'])
+// Migrations run as the schema owner, never as the API's restricted role.
+const databaseUrl = z.url().safeParse(process.env['MIGRATION_DATABASE_URL'])
 
 if (!command.success || !databaseUrl.success) {
-  fail('usage: DATABASE_URL=postgres://... tsx scripts/migrate.ts <up|status>\n')
+  fail('usage: MIGRATION_DATABASE_URL=postgres://... tsx scripts/migrate.ts <up|status>\n')
   process.exit(2)
 }
 

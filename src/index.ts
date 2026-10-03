@@ -11,14 +11,7 @@ const log = logger()
 
 const server = serve({ fetch: app.fetch, port: config.PORT })
 
-log.info(
-  {
-    baseCurrency: config.TENANT_BASE_CURRENCY,
-    port: config.PORT,
-    tenantTimezone: config.TENANT_TIMEZONE,
-  },
-  `${SERVICE_NAME} v${VERSION} listening`,
-)
+log.info({ authMode: config.AUTH_MODE, port: config.PORT }, `${SERVICE_NAME} v${VERSION} listening`)
 
 let shuttingDown = false
 
