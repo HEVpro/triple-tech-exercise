@@ -1,0 +1,695 @@
+{
+  "id": "9ce74dad-0fe0-486e-a4ed-f12ea731ec85",
+  "prevId": "cde5b30e-757b-4315-bdb2-a0ce8674c7ac",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.case_events": {
+      "name": "case_events",
+      "schema": "",
+      "columns": {
+        "actor_id": {
+          "name": "actor_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_type": {
+          "name": "actor_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "case_id": {
+          "name": "case_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_status": {
+          "name": "from_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recorded_at": {
+          "name": "recorded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rule_key": {
+          "name": "rule_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ruleset_version": {
+          "name": "ruleset_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "to_status": {
+          "name": "to_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "case_events_case_id_fkey": {
+          "name": "case_events_case_id_fkey",
+          "tableFrom": "case_events",
+          "tableTo": "cases",
+          "columnsFrom": [
+            "case_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "case_events_tenant_id_fkey": {
+          "name": "case_events_tenant_id_fkey",
+          "tableFrom": "case_events",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "case_events_pkey": {
+          "name": "case_events_pkey",
+          "columns": [
+            "case_id",
+            "seq"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "case_events_seq_check": {
+          "name": "case_events_seq_check",
+          "value": "\"case_events\".\"seq\" >= 1"
+        },
+        "case_events_event_type_check": {
+          "name": "case_events_event_type_check",
+          "value": "\"case_events\".\"event_type\" IN ('CASE_CREATED', 'EVIDENCE_FILED', 'SCHEME_OUTCOME_RECORDED', 'DEADLINE_EXPIRED', 'NOTE_ADDED')"
+        },
+        "case_events_actor_type_check": {
+          "name": "case_events_actor_type_check",
+          "value": "\"case_events\".\"actor_type\" IN ('human', 'agent', 'system')"
+        },
+        "case_events_actor_id_check": {
+          "name": "case_events_actor_id_check",
+          "value": "length(\"case_events\".\"actor_id\") BETWEEN 1 AND 200"
+        },
+        "case_events_from_status_check": {
+          "name": "case_events_from_status_check",
+          "value": "\"case_events\".\"from_status\" IN ('OPEN', 'UNDER_REVIEW', 'WON', 'LOST')"
+        },
+        "case_events_to_status_check": {
+          "name": "case_events_to_status_check",
+          "value": "\"case_events\".\"to_status\" IN ('OPEN', 'UNDER_REVIEW', 'WON', 'LOST')"
+        },
+        "case_events_rule_key_check": {
+          "name": "case_events_rule_key_check",
+          "value": "\"case_events\".\"rule_key\" IN ('deadline_passed', 'evidence_filed', 'scheme_outcome', 'default_open')"
+        },
+        "case_events_reason_check": {
+          "name": "case_events_reason_check",
+          "value": "length(\"case_events\".\"reason\") <= 1000"
+        },
+        "case_events_metadata_check": {
+          "name": "case_events_metadata_check",
+          "value": "jsonb_typeof(\"case_events\".\"metadata\") = 'object' AND pg_column_size(\"case_events\".\"metadata\") <= 16384"
+        },
+        "case_events_created_from_check": {
+          "name": "case_events_created_from_check",
+          "value": "(\"case_events\".\"event_type\" = 'CASE_CREATED') = (\"case_events\".\"from_status\" IS NULL)"
+        },
+        "case_events_rule_presence_check": {
+          "name": "case_events_rule_presence_check",
+          "value": "(\"case_events\".\"event_type\" = 'NOTE_ADDED') = (\"case_events\".\"rule_key\" IS NULL AND \"case_events\".\"ruleset_version\" IS NULL)"
+        },
+        "case_events_system_actor_check": {
+          "name": "case_events_system_actor_check",
+          "value": "(\"case_events\".\"actor_type\" = 'system') = (\"case_events\".\"event_type\" = 'DEADLINE_EXPIRED')"
+        },
+        "case_events_occurred_at_check": {
+          "name": "case_events_occurred_at_check",
+          "value": "\"case_events\".\"occurred_at\" = \"case_events\".\"recorded_at\" OR (\"case_events\".\"event_type\" = 'DEADLINE_EXPIRED' AND \"case_events\".\"occurred_at\" <= \"case_events\".\"recorded_at\")"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.cases": {
+      "name": "cases",
+      "schema": "",
+      "columns": {
+        "amount_base_minor": {
+          "name": "amount_base_minor",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount_minor": {
+          "name": "amount_minor",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "base_currency": {
+          "name": "base_currency",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "currency": {
+          "name": "currency",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deadline_at": {
+          "name": "deadline_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deadline_tz": {
+          "name": "deadline_tz",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deadline_window_days": {
+          "name": "deadline_window_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deadline_window_id": {
+          "name": "deadline_window_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decided_by_rule": {
+          "name": "decided_by_rule",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_ref": {
+          "name": "external_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fx_rate": {
+          "name": "fx_rate",
+          "type": "numeric(20, 10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fx_rate_date": {
+          "name": "fx_rate_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "presentment_date": {
+          "name": "presentment_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason_code": {
+          "name": "reason_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scheme": {
+          "name": "scheme",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "cases_tenant_id_fkey": {
+          "name": "cases_tenant_id_fkey",
+          "tableFrom": "cases",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "cases_deadline_window_id_fkey": {
+          "name": "cases_deadline_window_id_fkey",
+          "tableFrom": "cases",
+          "tableTo": "response_windows",
+          "columnsFrom": [
+            "deadline_window_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "cases_tenant_external_ref_key": {
+          "name": "cases_tenant_external_ref_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "external_ref"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "cases_external_ref_check": {
+          "name": "cases_external_ref_check",
+          "value": "length(\"cases\".\"external_ref\") BETWEEN 1 AND 128"
+        },
+        "cases_amount_minor_check": {
+          "name": "cases_amount_minor_check",
+          "value": "\"cases\".\"amount_minor\" > 0"
+        },
+        "cases_amount_base_minor_check": {
+          "name": "cases_amount_base_minor_check",
+          "value": "\"cases\".\"amount_base_minor\" >= 0"
+        },
+        "cases_currency_check": {
+          "name": "cases_currency_check",
+          "value": "\"cases\".\"currency\" ~ '^[A-Z]{3}$'"
+        },
+        "cases_base_currency_check": {
+          "name": "cases_base_currency_check",
+          "value": "\"cases\".\"base_currency\" ~ '^[A-Z]{3}$'"
+        },
+        "cases_fx_rate_check": {
+          "name": "cases_fx_rate_check",
+          "value": "\"cases\".\"fx_rate\" > 0"
+        },
+        "cases_scheme_check": {
+          "name": "cases_scheme_check",
+          "value": "\"cases\".\"scheme\" IN ('VISA', 'MASTERCARD', 'OTHER')"
+        },
+        "cases_reason_code_check": {
+          "name": "cases_reason_code_check",
+          "value": "length(\"cases\".\"reason_code\") BETWEEN 1 AND 20"
+        },
+        "cases_status_check": {
+          "name": "cases_status_check",
+          "value": "\"cases\".\"status\" IN ('OPEN', 'UNDER_REVIEW', 'WON', 'LOST')"
+        },
+        "cases_decided_by_rule_check": {
+          "name": "cases_decided_by_rule_check",
+          "value": "\"cases\".\"decided_by_rule\" IN ('deadline_passed', 'evidence_filed', 'scheme_outcome', 'default_open')"
+        },
+        "cases_version_check": {
+          "name": "cases_version_check",
+          "value": "\"cases\".\"version\" >= 1"
+        },
+        "cases_deadline_window_days_check": {
+          "name": "cases_deadline_window_days_check",
+          "value": "\"cases\".\"deadline_window_days\" BETWEEN 1 AND 365"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.fx_rates": {
+      "name": "fx_rates",
+      "schema": "",
+      "columns": {
+        "base_currency": {
+          "name": "base_currency",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rate": {
+          "name": "rate",
+          "type": "numeric(20, 10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rate_date": {
+          "name": "rate_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "fx_rates_pkey": {
+          "name": "fx_rates_pkey",
+          "columns": [
+            "currency",
+            "base_currency"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "fx_rates_currency_check": {
+          "name": "fx_rates_currency_check",
+          "value": "\"fx_rates\".\"currency\" ~ '^[A-Z]{3}$'"
+        },
+        "fx_rates_base_currency_check": {
+          "name": "fx_rates_base_currency_check",
+          "value": "\"fx_rates\".\"base_currency\" ~ '^[A-Z]{3}$'"
+        },
+        "fx_rates_rate_check": {
+          "name": "fx_rates_rate_check",
+          "value": "\"fx_rates\".\"rate\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.response_windows": {
+      "name": "response_windows",
+      "schema": "",
+      "columns": {
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "deadline_tz": {
+          "name": "deadline_tz",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'UTC'"
+        },
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "response_windows_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "reason_code": {
+          "name": "reason_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "scheme": {
+          "name": "scheme",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "window_days": {
+          "name": "window_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "response_windows_scheme_reason_code_key": {
+          "name": "response_windows_scheme_reason_code_key",
+          "nullsNotDistinct": true,
+          "columns": [
+            "scheme",
+            "reason_code"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "response_windows_scheme_check": {
+          "name": "response_windows_scheme_check",
+          "value": "\"response_windows\".\"scheme\" IN ('VISA', 'MASTERCARD', 'OTHER')"
+        },
+        "response_windows_reason_code_check": {
+          "name": "response_windows_reason_code_check",
+          "value": "length(\"response_windows\".\"reason_code\") BETWEEN 1 AND 20"
+        },
+        "response_windows_window_days_check": {
+          "name": "response_windows_window_days_check",
+          "value": "\"response_windows\".\"window_days\" BETWEEN 1 AND 365"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.tenant_rule_config": {
+      "name": "tenant_rule_config",
+      "schema": "",
+      "columns": {
+        "priority": {
+          "name": "priority",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rule_key": {
+          "name": "rule_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "tenant_rule_config_tenant_id_fkey": {
+          "name": "tenant_rule_config_tenant_id_fkey",
+          "tableFrom": "tenant_rule_config",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "tenant_rule_config_pkey": {
+          "name": "tenant_rule_config_pkey",
+          "columns": [
+            "tenant_id",
+            "rule_key"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "tenant_rule_config_priority_key": {
+          "name": "tenant_rule_config_priority_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "priority"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "tenant_rule_config_rule_key_check": {
+          "name": "tenant_rule_config_rule_key_check",
+          "value": "\"tenant_rule_config\".\"rule_key\" IN ('deadline_passed', 'evidence_filed', 'scheme_outcome')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.tenants": {
+      "name": "tenants",
+      "schema": "",
+      "columns": {
+        "base_currency": {
+          "name": "base_currency",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "display_timezone": {
+          "name": "display_timezone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'UTC'"
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "tenants_name_check": {
+          "name": "tenants_name_check",
+          "value": "length(\"tenants\".\"name\") BETWEEN 1 AND 200"
+        },
+        "tenants_base_currency_check": {
+          "name": "tenants_base_currency_check",
+          "value": "\"tenants\".\"base_currency\" ~ '^[A-Z]{3}$'"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

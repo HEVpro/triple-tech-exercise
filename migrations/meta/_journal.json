@@ -15,6 +15,13 @@
       "when": 1790993607820,
       "tag": "20261003021327_usd_fx_rates",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790996832765,
+      "tag": "20261003030712_drop_rule_enabled",
+      "breakpoints": true
     }
   ]
 }

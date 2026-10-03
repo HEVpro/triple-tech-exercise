@@ -1,7 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
   bigint,
-  boolean,
   char,
   check,
   date,
@@ -154,7 +153,6 @@ export const caseEvents = pgTable(
 export const tenantRuleConfig = pgTable(
   'tenant_rule_config',
   {
-    enabled: boolean('enabled').notNull().default(true),
     priority: integer('priority').notNull(),
     rule_key: text('rule_key').$type<ConfigurableRuleKey>().notNull(),
     tenant_id: uuid('tenant_id').notNull(),
