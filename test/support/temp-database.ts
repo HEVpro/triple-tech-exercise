@@ -24,8 +24,14 @@ export async function createTempDatabase(): Promise<TempDatabase> {
   const pool = new Pool({ connectionString: url.toString(), max: 4 })
 
   return {
+    // Callers end their own pools first. pg-pool resolves end() as soon as its clients are
+    // detached, before their sockets have closed, so the database is dropped only once
+    // PostgreSQL reports no session left on it. Forcing the drop earlier terminates those
+    // closing sessions, and the FATAL reaches a client with no listener: an uncaught error that
+    // fails the run even though every test passed.
     drop: async () => {
       await pool.end()
+      await waitUntilNoSessions(admin, name)
       await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
       await admin.end()
     },
@@ -43,5 +49,16 @@ export async function databaseAvailable(): Promise<boolean> {
     return false
   } finally {
     await probe.end()
+  }
+}
+
+async function waitUntilNoSessions(admin: Pool, database: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = await admin.query<{ sessions: number }>(
+      'SELECT count(*)::int AS sessions FROM pg_stat_activity WHERE datname = $1',
+      [database],
+    )
+    if (result.rows[0]?.sessions === 0) return
+    await new Promise((resolve) => setTimeout(resolve, 50))
   }
 }
