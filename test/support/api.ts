@@ -2,6 +2,8 @@ import { drizzle } from 'drizzle-orm/node-postgres'
 import { sign } from 'hono/jwt'
 import { Pool } from 'pg'
 
+import type { CaseStore } from '../../src/application/cases/index.js'
+
 import { DEV_TENANTS, type DevTenantSlug } from '../../scripts/dev-tenants.js'
 import { createApp } from '../../src/http/app.js'
 import { postgresCaseStore } from '../../src/infrastructure/db/case-store.js'
@@ -27,6 +29,8 @@ export interface TestApi {
     path: string,
     options?: { body?: unknown; headers?: Record<string, string>; token?: null | string },
   ) => Promise<{ body: Record<string, unknown>; status: number }>
+  // The same store the API uses, connected as triple_api: for use cases outside HTTP (the sweeper).
+  store: CaseStore
   token: (tenant?: DevTenantSlug, claims?: Record<string, unknown>) => Promise<string>
 }
 
@@ -43,9 +47,10 @@ export async function startApi(): Promise<TestApi> {
   url.password = API_ROLE.password
   const apiPool = new Pool({ connectionString: url.toString(), max: 4 })
 
+  const store = postgresCaseStore(drizzle({ client: apiPool, schema }))
   const app = createApp({
     auth: AUTH,
-    caseStore: postgresCaseStore(drizzle({ client: apiPool, schema })),
+    caseStore: store,
     ping: () => apiPool.query('SELECT 1'),
   })
 
@@ -88,6 +93,7 @@ export async function startApi(): Promise<TestApi> {
       })
       return { body: (await response.json()) as Record<string, unknown>, status: response.status }
     },
+    store,
     token,
   }
 }

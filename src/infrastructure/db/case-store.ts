@@ -19,7 +19,11 @@ type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
 // CaseRecord (reads) and that a NewCaseRecord is a valid insert (writes).
 export function postgresCaseStore(db: Db): CaseStore {
   return {
-    transaction: (work) => db.transaction((tx) => work(caseTransaction(tx))),
+    transaction: (work, options) =>
+      db.transaction(
+        (tx) => work(caseTransaction(tx)),
+        options?.snapshot ? { accessMode: 'read only', isolationLevel: 'repeatable read' } : {},
+      ),
   }
 }
 

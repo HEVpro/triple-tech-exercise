@@ -12,19 +12,23 @@ export interface CaseHistoryResult {
 }
 
 // GET /cases/:id/history?as_of=. The case as its log recorded it at `asOf` (default: now).
-// Reconstruction never evaluates rules (D-11); a case of another tenant is not found.
+// Reconstruction never evaluates rules (D-11); a case of another tenant is not found. The case and
+// its events are read from one snapshot, so a concurrent transition cannot split them.
 export function caseHistory(
   store: CaseStore,
   principal: Principal,
   caseId: string,
   asOf: Date | null,
 ): Promise<CaseHistoryResult> {
-  return store.transaction(async (tx) => {
-    const record = await tx.caseById(principal.tenantId, caseId)
-    if (!record) throw new CaseError('case_not_found', 'case not found')
-    const at = asOf ?? (await tx.now())
-    return { asOf: at, case: record, view: foldHistory(await tx.events(record.id), at) }
-  })
+  return store.transaction(
+    async (tx) => {
+      const record = await tx.caseById(principal.tenantId, caseId)
+      if (!record) throw new CaseError('case_not_found', 'case not found')
+      const at = asOf ?? (await tx.now())
+      return { asOf: at, case: record, view: foldHistory(await tx.events(record.id), at) }
+    },
+    { snapshot: true },
+  )
 }
 
 // GET /cases?external_ref=. Zero or one case: external_ref is unique per tenant.

@@ -16,8 +16,13 @@ import type {
 
 export interface CaseStore {
   // Runs `work` in one database transaction. Everything a use case writes (the projection and
-  // its events) commits together or not at all.
-  transaction<T>(work: (tx: CaseTransaction) => Promise<T>): Promise<T>
+  // its events) commits together or not at all. `snapshot` makes it read-only and REPEATABLE
+  // READ, so a read made of several queries (a report's summary and page, a case and its events)
+  // sees one consistent state of the database.
+  transaction<T>(
+    work: (tx: CaseTransaction) => Promise<T>,
+    options?: { snapshot?: boolean },
+  ): Promise<T>
 }
 
 export interface CaseTransaction {

@@ -83,6 +83,28 @@ describe.skipIf(!available)('GET /cases/:id/history', () => {
     expect(body).toMatchObject({ decided_by: null, events: [], state: null })
   })
 
+  it('can read in a read-only snapshot, as multi-query reads do', async () => {
+    // History (and the stuck-queue report) run in a `snapshot` transaction: REPEATABLE READ and
+    // read only, so their several queries see one state. A write inside one must fail, which
+    // proves the option reaches PostgreSQL.
+    const id = await openCase()
+    const tenantId = '11111111-1111-4111-8111-111111111111'
+
+    await expect(
+      api.store.transaction(
+        async (tx) => {
+          const record = await tx.caseById(tenantId, id)
+          if (!record) throw new Error('fixture: case expected')
+          return tx.advance(record, 'OPEN', 'default_open')
+        },
+        { snapshot: true },
+      ),
+    ).rejects.toMatchObject({
+      // Drizzle wraps the driver error; PostgreSQL's own reason is the cause.
+      cause: { message: expect.stringMatching(/read-only transaction/) as unknown },
+    })
+  })
+
   it('rejects an as_of without a time zone', async () => {
     const id = await openCase()
 
