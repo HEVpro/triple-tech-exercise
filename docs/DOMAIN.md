@@ -69,7 +69,7 @@ always shadow rule 3. Both defects are fixed by the predicates below (NOTES 2.10
   contradictory case of rule 1 against rule 3, and rule 1 wins: a bank that never answered cannot
   win. In practice the case is already `LOST` by then and the outcome is rejected as a transition
   out of a terminal state.
-- Predicates live in code (`src/domain`). Order and enablement per tenant live in
+- Predicates live in code (`src/domain`). The order per tenant lives in
   `tenant_rule_config` (D-8). An empty config means the default order above.
 - **Rules run on write only**: when a case is created, when a transition is requested, and when the
   sweeper finds an expired deadline. The decision is stored on the event as `to_status`, `rule_key`
@@ -158,7 +158,8 @@ without gaps, and a gap would reveal a deleted event.
 
 ### `tenant_rule_config`
 
-`tenant_id`, `rule_key`, `enabled`, `priority`. Order and enablement as data, predicates in code.
+`tenant_id`, `rule_key`, `priority`. The order as data, predicates in code. No rule can be switched
+off: every rule has a business meaning the system must honour (NOTES 2.23).
 
 ### Event catalogue (v1)
 
@@ -328,34 +329,71 @@ GET /cases/:id/history?as_of=2025-03-01T00:00:00Z
 ### Sweep for expired deadlines
 
 ```
-every SWEEP_INTERVAL_MS (default 60 s)
-  ├─ SELECT … WHERE status = 'OPEN' AND deadline_at <= now() FOR UPDATE SKIP LOCKED LIMIT n
-  ├─ for each: version + 1, DEADLINE_EXPIRED (system, occurred_at = deadline_at), status LOST
-  └─ commit per batch
+sweepDeadlines (src/application/cases/sweep-deadlines.ts), one transaction per batch of 500:
+  ├─ SELECT … WHERE status = 'OPEN' AND deadline_at <= now()
+  │    ORDER BY deadline_at LIMIT 500 FOR UPDATE SKIP LOCKED          (cases_sweep_idx)
+  ├─ for each: rules at now() → DEADLINE_EXPIRED (system, occurred_at = deadline_at), status LOST
+  └─ until a batch comes back short, at most 100 batches per run
 ```
 
-Only `OPEN`: `UNDER_REVIEW` cannot lose to the deadline. Idempotent, because a swept case is no
-longer `OPEN`. `SKIP LOCKED` lets several workers run without contending.
+- Only `OPEN`: `UNDER_REVIEW` filed evidence in time and cannot lose to the deadline.
+- Idempotent, because a swept case is no longer `OPEN`. `SKIP LOCKED` lets several sweepers run at
+  once without taking the same case; a test runs two in parallel and checks each case gets exactly
+  one `DEADLINE_EXPIRED`.
+- Every rule is always on (NOTES 2.23), so a selected case is always expired: nothing can be selected
+  again and again and starve the other tenants.
+- The run reports `expired`, `batches` and `maxLagSeconds` (now minus the most overdue deadline),
+  the input for the sweep-lag SLO.
+
+How it runs (D-44): one function, two entry points. `npm run worker` loops every
+`SWEEP_INTERVAL_MS` without overlapping runs and stops cleanly on SIGTERM; `npm run sweep` makes one
+pass and exits. In production the one-pass form is what a scheduler runs every minute (an
+EventBridge rule invoking a Lambda, or a Kubernetes CronJob); the loop is this exercise's default.
 
 ### Stuck-queue report
 
 ```
-GET /reports/stuck-queue?risk_window_days=7&limit=50&cursor=…
-  at_risk:  status IN ('OPEN','UNDER_REVIEW') AND deadline_at <= now() + risk_window   (the brief)
-  breached: status = 'LOST' AND decided_by_rule = 'deadline_passed'
-            AND deadline_at >= now() - risk_window
-  UNION ALL, ORDER BY amount_base_minor DESC, id; keyset pagination on (amount_base_minor, id)
+GET /reports/stuck-queue?risk_window_days=7&state=at_risk,breached&limit=50&cursor=…
 ```
 
-Each row carries `deadline_state`:
+It is not a separate entity: it is a query over `cases`, the brief's *queue_report*, answering
+"where is this bank losing money". Each case in it has a `deadline_state`:
 
-| `deadline_state` | Meaning |
-| --- | --- |
-| `at_risk` | `OPEN`, deadline inside the window: act now. |
-| `responded` | `UNDER_REVIEW`: in the brief's filter, but evidence is already filed. |
-| `breached` | Lost to the deadline within the lookback: money already lost. |
+| `deadline_state` | Cases | Meaning |
+| --- | --- | --- |
+| `at_risk` | `OPEN`, deadline within `risk_window_days` and still ahead | The bank can act, and must. |
+| `breached` | `OPEN` with the deadline passed (not yet swept), or `LOST` by `deadline_passed` with the deadline in the last `risk_window_days` | Money already lost. |
+| `responded` | `UNDER_REVIEW` with the deadline within `risk_window_days` or passed | Evidence filed in time; waiting for the card network. |
 
-The brief's filter is kept verbatim for `at_risk` and `responded`; `breached` is an addition (D-28).
+`at_risk` and `responded` together are exactly the brief's filter (`status IN (OPEN, UNDER_REVIEW)
+AND deadline_at <= now() + risk_window`). Because that filter has no lower bound, `responded` would
+otherwise grow forever with cases that need nothing from the bank, and bury the actionable ones.
+So (D-43):
+
+- **`summary`** always counts all three states, with their amount in the tenant's base currency;
+- **`items`** list, by default, the actionable states `at_risk,breached`; `?state=responded` (or any
+  combination) lists the others, so the brief's exact set is one parameter away;
+- items are ordered by `amount_base_minor` then `id`, both descending, with an opaque keyset cursor
+  (`next_cursor`); each item carries `seconds_to_deadline` (negative once passed), so a console
+  needs no date logic.
+
+```json
+{
+  "generated_at": "…", "risk_window_days": 7, "base_currency": "EUR",
+  "states": ["at_risk", "breached"],
+  "summary": {
+    "at_risk":   { "count": 312, "amount_base_minor": 48210000 },
+    "breached":  { "count": 17,  "amount_base_minor": 2310000 },
+    "responded": { "count": 905, "amount_base_minor": 91000000 }
+  },
+  "items": [ { "…case fields…": "…", "deadline_state": "at_risk", "seconds_to_deadline": 431000 } ],
+  "next_cursor": "eyJhIjoi…"
+}
+```
+
+The page is chosen from covering indexes alone (`cases_queue_idx`, `cases_queue_breached_idx`) and
+only its rows are read from the table; on the 1M-case fixture a page takes about 1 ms
+(`npm run perf:explain`, NOTES 2.24).
 
 ---
 

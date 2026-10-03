@@ -4,7 +4,7 @@ Each phase leaves the repository working with its gates green. The plan was cut 
 six (0 to 5) after a scope review: the console, OIDC and effective-dated windows were dropped or
 deferred (NOTES 2.13).
 
-Current status: **phases 0 to 3 complete.**
+Current status: **phases 0 to 4 complete.**
 
 ---
 
@@ -16,8 +16,8 @@ Current status: **phases 0 to 3 complete.**
 | 1 | Schema, migration runner, migration plan | Can we change live data safely; is the audit trail enforced by the database | done |
 | 2 | Domain core: money, deadline, rules, events | Is the business logic correct and auditable | done |
 | 3 | Case API with dev auth and tenant isolation | Do we keep the bank contract and reconstruct history truthfully | done |
-| 4 | Stuck-queue report and deadline sweeper | Do we find the money before the deadline does | next |
-| 5 | Performance evidence and SLOs | Does it hold at scale, measured | |
+| 4 | Stuck-queue report and deadline sweeper | Do we find the money before the deadline does | done |
+| 5 | Performance evidence and SLOs | Does it hold at scale, measured | next |
 
 ---
 
@@ -119,26 +119,40 @@ tested at the domain level.
 
 ---
 
-## Phase 4: Stuck-queue report and sweeper
+## Phase 4: Stuck-queue report and sweeper — done
 
-- `GET /reports/stuck-queue` with `risk_window_days` (default 7), `deadline_state`, `LIMIT` and keyset
-  pagination.
-- `src/worker/sweeper.ts`: `OPEN` cases past their deadline, `FOR UPDATE SKIP LOCKED`, batch,
-  idempotent, `system` actor, `SWEEP_INTERVAL_MS`.
+**Delivered**
 
-**Exit criteria:** review scenarios 1 and 2 return the expected rows; two concurrent sweepers produce
-one set of events; the report plan uses the partial index (`EXPLAIN`).
+- **Performance data first** (moved here from phase 5, NOTES 2.24): `npm run seed:perf` builds
+  1M cases into the development database, mostly under the Acme dev tenant, each with the events
+  that explain its status (2.8M events; invariant 3 holds), plus a 400-event case;
+  `npm run perf:explain` prints `EXPLAIN (ANALYZE, BUFFERS)` for the SQL Drizzle actually generates.
+- **The report index, chosen on evidence**: two candidates measured on 1M rows; the covering
+  `(tenant_id, deadline_at) INCLUDE (amount_base_minor, status, id)` won (page 32 ms → 1–3.5 ms,
+  index-only). Added as an expand step with `CONCURRENTLY`; the old indexes stay until phase 5.
+- **Sweeper**: `sweepDeadlines` (batches, `SKIP LOCKED`, idempotent), `npm run worker` and
+  `npm run sweep`; scheduler-based production deployment documented (D-44).
+- **`GET /reports/stuck-queue`**: summary of all states, actionable items by default, filter by
+  state, keyset cursor, frozen v1 contract (D-43).
+- Removed what had no use case: the per-rule `enabled` switch (NOTES 2.23) and sqlfluff (D-23).
+- Fixed a CI-only failure: test databases were dropped while pg-pool connections were still closing.
+
+**Exit criteria, met**
+
+- Scenarios 1 and 2 return the expected rows, states and summary through the API.
+- Two concurrent sweepers record exactly one `DEADLINE_EXPIRED` per case.
+- `EXPLAIN` shows the report page and summary index-only on 1M cases.
 
 ---
 
 ## Phase 5: Performance evidence and SLOs
 
-- `scripts/seed-perf.ts`: 1M cases, realistic distribution, generated in SQL; one case with 400
-  events. A `--rows` flag exists for anyone who wants 10M.
-- `docs/PERFORMANCE.md`: `EXPLAIN (ANALYZE, BUFFERS)` for the report and history, and the scaling
-  argument (TRADEOFFS §10).
+- **Contract step for the report indexes**: confirm the summary moves to the new indexes, then drop
+  `cases_at_risk_idx` and `cases_breached_idx` with `DROP INDEX CONCURRENTLY`.
+- Complete `docs/PERFORMANCE.md` (started in phase 4 with the 1M measurements): systematic cold and
+  warm runs, the summary's plan after the contract step, optionally the 10M run.
 - `docs/SLOS.md`: what pages someone at 3am (a breached deadline that was not at risk the day before,
-  sweeper lag, a failed event write).
+  sweep lag from `maxLagSeconds`, a failed event write).
 
 **Exit criteria:** scenario 3 under 200 ms and scenario 4 under 100 ms, measured; D-13 (no
 partitioning) confirmed or reversed with numbers.

@@ -14,10 +14,7 @@ You need exactly two things:
 | Requirement | Version | Why |
 | --- | --- | --- |
 | **Node.js** | 22.13 or newer | Check with `node --version`. If you use `nvm`, `nvm use` picks the pinned version from `.nvmrc`. |
-| **Docker** | any recent version | Runs PostgreSQL, and the optional SQL linter and secret scanner. |
-
-**You do not need Python.** The SQL linter runs inside a Docker container. See
-[SQL linting](#sql-linting).
+| **Docker** | any recent version | Runs PostgreSQL, and the optional secret scanner. |
 
 Nothing else is required: no global installs, no database client, no separate package manager.
 
@@ -182,6 +179,55 @@ curl -s http://localhost:3000/cases/$CASE_ID
 | 409 | `rule_conflict` (with the rule that decided), `case_closed`, `external_ref_conflict` |
 | 422 | `not_an_action`, `unsupported_currency`, `presentment_in_future`, `response_window_missing` |
 
+### 6. Run the deadline sweeper
+
+The sweeper records the automatic loss of every `OPEN` case whose deadline has passed. In a second
+terminal:
+
+```bash
+npm run worker      # loops every SWEEP_INTERVAL_MS (60 s); Ctrl-C stops after the current pass
+npm run sweep       # or: one pass and exit
+```
+
+In production the one-pass form is what a scheduler would run every minute (an EventBridge rule
+invoking a Lambda, or a Kubernetes CronJob); see `docs/TRADEOFFS.md` §7b.
+
+### 7. Read the stuck-queue report
+
+Where the bank is losing money: a summary of every state, and the cases that need action first,
+ordered by amount in the bank's base currency.
+
+```bash
+curl -s "http://localhost:3000/reports/stuck-queue" -H "authorization: Bearer $TOKEN"
+curl -s "http://localhost:3000/reports/stuck-queue?state=at_risk,breached,responded&risk_window_days=14&limit=20" -H "authorization: Bearer $TOKEN"
+```
+
+| `deadline_state` | Meaning |
+| --- | --- |
+| `at_risk` | `OPEN`, deadline within the window: act now |
+| `breached` | the deadline passed without an answer: money already lost |
+| `responded` | evidence filed in time, waiting for the card network (counted in `summary`, listed with `?state=responded`) |
+
+`next_cursor` in the response is passed back as `?cursor=` for the next page.
+
+### 8. A million cases to explore (optional)
+
+```bash
+npm run seed:perf       # adds 1M cases with their full event history to your database, ~1 min
+npm run perf:explain    # EXPLAIN (ANALYZE, BUFFERS) of the SQL the API actually runs
+```
+
+The cases go into the development database itself, mostly under Acme, so everything above works on
+them with the same token: the report now lists thousands of cases, and any case's history shows the
+events that explain its status (`external_ref` `PERF-…`; `PERF-HISTORY-400` has 400 events).
+`npm run seed:perf -- --rows 100000` is a lighter run.
+
+- Seeded events are recorded at seeding time, because `recorded_at` is always the database clock;
+  a history `as_of` an earlier instant shows nothing.
+- It runs once: the event log is append-only. To start over:
+  `npm run db:reset && npm run db:migrate && npm run dev:seed && npm run seed:perf`.
+- To look at the data directly: `docker exec -it triple-postgres psql -U triple -d triple`.
+
 ### Starting over
 
 ```bash
@@ -210,11 +256,15 @@ npm run db:reset && npm run db:migrate && npm run dev:seed
 | `npm run db:schema:check` | Fail if the TypeScript schema changed without a migration |
 | `npm run dev:seed` | Create the API role `triple_api` and the two demo tenants (idempotent) |
 | `npm run dev:token` | Print a development bearer token (`--tenant`, `--actor`, `--sub`, `--ttl`) |
-| `npm run lint:sql` | sqlfluff 4.4.0 inside Docker |
+| `npm run worker` / `npm run sweep` | Deadline sweeper: a loop, or one pass and exit |
+| `npm run start:worker` | The compiled sweeper loop (`dist/worker/main.js`) |
+| `npm run seed:perf` | Add 1M cases with their events to the dev database (`--rows N`) |
+| `npm run perf:explain` | Query plans of the report and history on the seeded data |
 | `npm run scan:secrets` | gitleaks 8.30.1 inside Docker, over the full git history |
 
 `scripts/` holds only command-line entry points: `migrate.ts`, `dev-seed.ts` and `dev-token.ts`
-(with the shared `dev-tenants.ts`), and the performance fixture generator in phase 5.
+(with the shared `dev-tenants.ts`), `seed-perf.ts` and `perf-explain.ts`. The sweeper is not a
+script: it ships with the application, in `src/worker`.
 
 ---
 
@@ -237,7 +287,7 @@ OpenAPI definition, so the contract cannot drift from the implementation.
 | `POST` | `/cases/:id/transitions` | `{ to, reason, … }`, decided by the terminal rules | done |
 | `POST` | `/cases/:id/notes` | Record work done on a case | done |
 | `GET` | `/cases/:id/history?as_of=` | The case as recorded at an instant, with its events | done |
-| `GET` | `/reports/stuck-queue` | At-risk and breached cases, ordered by money | 4 |
+| `GET` | `/reports/stuck-queue` | Summary of every state, and at-risk and breached cases ordered by money | done |
 
 Paths are unversioned because banks already consume `GET /cases/:id`; changes are additive only,
 and `test/contract/case-v1.ts` fails the build if a published field is removed, renamed or retyped.
@@ -295,7 +345,7 @@ an import that goes the other way or reaches into a block's internal file. The c
 The full register, with rejected alternatives, is in [`NOTES.md`](./NOTES.md).
 
 **[`docs/PHASES.md`](./docs/PHASES.md)** — the delivery phases, what each one delivers and its exit
-criteria. Phases 0 to 3 are complete.
+criteria. Phases 0 to 4 are complete.
 
 **[`docs/DOMAIN.md`](./docs/DOMAIN.md)** — states, terminal rules, entities, flows, invariants and use
 cases, written to be read without reading the code.
@@ -391,8 +441,8 @@ and `prettier --write`.
 **On push:** `typecheck`, `lint`, `test`, `build`.
 
 **In CI:** `format:check`, `typecheck`, `lint`, migrations applied twice to prove idempotency,
-`test:coverage`, `build`; plus sqlfluff, gitleaks over the full history, and commitlint, each in its
-own job.
+`test:coverage`, `build`, and `db:schema:check`; plus gitleaks over the full history and
+commitlint, each in its own job.
 
 The test suite runs without PostgreSQL: database tests skip themselves when the server is unreachable.
 When it is reachable, each suite creates a throwaway database, migrates it, and drops it, so tests
@@ -408,17 +458,6 @@ never touch your data.
 - **Deterministic ordering** of imports, object keys and union members.
 - **Coverage thresholds** in `test:coverage`; the branch threshold is a floor to raise as domain logic
   lands.
-
----
-
-## SQL linting
-
-```bash
-npm run lint:sql
-```
-
-[sqlfluff](https://github.com/sqlfluff/sqlfluff) 4.4.0 in Docker, configured in `.sqlfluff`. It owns
-both layout and semantic rules for `migrations/`; Prettier does not format SQL. No Python is needed.
 
 ---
 
@@ -438,6 +477,10 @@ automatically.
 | `AUTH_MODE` | `dev` | The only mode. The server refuses to start with `NODE_ENV=production` |
 | `JWT_SECRET` | — | HS256 secret, at least 32 characters |
 | `JWT_ISSUER` / `JWT_AUDIENCE` | — | Checked on every request |
+
+The deadline sweeper reads only the database, logging and `SWEEP_INTERVAL_MS` settings: it needs no
+JWT secret and runs with `NODE_ENV=production`; the authentication settings belong to the API
+alone.
 | `SWEEP_INTERVAL_MS` | `60000` | Deadline sweeper period (phase 4) |
 
 ---
@@ -476,10 +519,11 @@ so a clean `npm install` resolves it; if node_modules is in a strange state, rem
 
 ## Project status
 
-Phases 0 to 3 of 0–5 are complete: toolchain and gates, the schema and migration runner with the
-live-data plan, the domain core, and the case API with development auth and tenant isolation. Next
-is phase 4, the stuck-queue report and the deadline sweeper. What is deliberately unfinished is
-listed in [`NOTES.md`](./NOTES.md) section 4.
+Phases 0 to 4 of 0–5 are complete: toolchain and gates, the schema and migration runner with the
+live-data plan, the domain core, the case API with development auth and tenant isolation, and the
+stuck-queue report with the deadline sweeper, measured on a million cases. Phase 5 is the
+performance write-up at scale and the SLOs. What is deliberately unfinished is listed in
+[`NOTES.md`](./NOTES.md) section 4.
 
 | Document | Contents |
 | --- | --- |
@@ -487,6 +531,7 @@ listed in [`NOTES.md`](./NOTES.md) section 4.
 | [`docs/DOMAIN.md`](./docs/DOMAIN.md) | States, rules, clocks, schema, API contract, invariants |
 | [`docs/TRADEOFFS.md`](./docs/TRADEOFFS.md) | Trade-offs per review scenario, deviations from the brief |
 | [`docs/MIGRATION_PLAN.md`](./docs/MIGRATION_PLAN.md) | Migrations against live data for 60+ tenants |
+| [`docs/PERFORMANCE.md`](./docs/PERFORMANCE.md) | Measured plans and timings for review scenarios 3 and 4 |
 | [`NOTES.md`](./NOTES.md) | How AI was used, failed prompts, decision register, open gaps |
 | [`AGENTS.md`](./AGENTS.md) | Rules for coding agents |
 | [`migrations/README.md`](./migrations/README.md) | Migration conventions, drizzle-kit workflow and the runner |

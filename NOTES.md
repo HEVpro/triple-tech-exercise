@@ -232,14 +232,15 @@ repository guards.
 Each one was defensible in isolation. Each one fell when the human asked what concrete case it served
 in *this* exercise. The replacements are smaller and say what they give up: a two-column unique key
 (D-3), live-safe greenfield migrations plus a written plan (D-34), one 1M fixture plus a written
-scaling argument (D-2), six phases (D-35), dev tokens, sqlfluff only, gitleaks (D-32).
+scaling argument (D-2), six phases (D-35), dev tokens, sqlfluff only (later none, D-23), gitleaks (D-32).
 
 ### 2.14 A documented guarantee that was not true
 
 The README and D-24 stated that "Prettier is the single formatter for SQL". It never was:
 `.prettierignore` excluded `*.sql` and no SQL plugin was installed, so the SQL override in
 `.prettierrc.json` was dead configuration. Caught while reviewing whether `scripts/` was needed at
-all. sqlfluff now owns SQL layout explicitly.
+all. sqlfluff then owned SQL layout explicitly, until it was removed altogether in phase 4 once
+drizzle-kit generated the SQL (D-23).
 
 ### 2.15 Whose time zone is the deadline in?
 
@@ -379,6 +380,101 @@ Domain tests passed, because they only tried `OPEN` on cases in other states; th
 that tried it on a fresh case failed. The order was fixed in the domain, where the rule lives, and
 the missing case was added to the domain tests.
 
+### 2.23 Business logic the AI invented, caught by the human
+
+**What happened:** the brief asks for *"configurable, ordered rules"*. In phase 1 the AI added an
+`enabled` column to `tenant_rule_config`, so a tenant could switch a rule off, and in phase 2 the
+domain honoured it, with tests ("lets a tenant disable the automatic loss"). Nobody asked for it;
+it looked like a natural extension of "configurable".
+
+**How it surfaced:** planning the phase 4 sweeper, the AI found that a tenant with `deadline_passed`
+disabled would leave expired cases `OPEN` forever, be re-selected on every sweep, and could starve
+the sweeper for every other tenant. Its first proposal was to *protect* the switch: a database
+constraint and a domain check forbidding that one rule from being disabled, plus a plausible
+business reason a bank might want it.
+
+**How it was caught:** the human asked why a bank should be able to do this at all, and told the AI
+not to exceed the brief or presume. Looked at plainly, the switch had no valid use for any rule:
+switching off `deadline_passed` makes the system contradict the card network, which loses the case
+anyway; switching off `evidence_filed` makes evidence impossible to file; switching off
+`scheme_outcome` makes `WON` unreachable. The business reason offered was the AI's own invention.
+
+**Correction:** remove what was invented instead of adding code around it. Tenant configuration is
+the rule **order** only, which is what the brief asks for. Done in two steps, as a live database
+would need: the code stops reading the column, then a drizzle-kit migration drops it. The sweeper
+problem disappears with it. Lesson recorded in AGENTS.md's spirit: a feature with no use case is
+not "flexibility", it is a liability someone later has to defend.
+
+### 2.24 An index designed before its query, and the data to check it planned too late
+
+**What happened:** phase 1 created the stuck-queue indexes before the report query existed. They
+matched the filter, `(tenant_id, deadline_at)`, but not what the query does next: order by
+`(amount_base_minor, id)` and page by a cursor on both. Without `id` in the index PostgreSQL ignored
+it and read one table block per case at risk. Separately, the plan put the performance fixture in
+phase 5 while phase 4's exit criterion was an `EXPLAIN`: the evidence was scheduled after the
+decision it was needed for.
+
+**How it was caught:** planning phase 4, the AI wrote the query and saw the gap; the human called it
+a planning error and asked why the seed they expected did not exist.
+
+**Correction:** the 1M-case seed moved to the start of phase 4. Two candidate indexes were measured on
+it: the covering `(tenant_id, deadline_at) INCLUDE (amount_base_minor, status, id)` took the first
+page from 32 ms to 1–3.5 ms; one ordered by amount took 23 ms, because most deadline losses are old
+and walking by amount discards thousands of them. The winner was added with `CONCURRENTLY` as an
+expand step (no row touched, no write blocked); the old indexes are dropped in phase 5, after
+measuring that the summary moves to the new ones. `npm run perf:explain` re-runs the SQL Drizzle
+actually generates under `EXPLAIN`, so the evidence is the real query, not a hand-written copy.
+The method recorded: write the query, then design the index, then prove it on representative data.
+
+### 2.25 Green tests, red CI: a teardown race
+
+All 172 tests passed in CI and the job still failed on an uncaught `57P01 terminating connection
+due to administrator command`. Reading pg-pool's source: `end()` resolves as soon as its clients are
+detached, before their sockets close, and the test helper then ran `DROP DATABASE … WITH (FORCE)`,
+which killed those closing sessions; the FATAL reached a client with no listener. It never showed
+locally, only on CI timing. The helper now waits until `pg_stat_activity` reports no session on the
+database before dropping it.
+
+### 2.26 Smaller misstatements caught on re-reading
+
+- The performance seed's header promised "one case with 400 events" that the code did not create.
+  Added, so the comment and `perf:explain` are true.
+- A report test was commented "each test gets its own API" while the API was shared, and it only
+  passed because it ran first. A first fix compared the summary with itself, which proves nothing.
+  It now records the summary before creating its cases and asserts the exact increase.
+
+### 2.27 The performance data was invisible where the human looked
+
+**What happened:** the first version of `seed:perf` built a separate database, `triple_perf`, with the
+`cases` projection only. The human seeded it, opened their development database, found nothing,
+and could not run the `EXPLAIN`. Even where the data was, it could not be explored through the API
+(no dev tenant), and a case's history was empty, which is the opposite of an audit trail.
+
+**Correction:** the seed now writes into the development database, mostly under the Acme dev tenant,
+and generates for every case the events that explain its status, so the projection equals its log
+(checked: 0 mismatches) and the report and any history can be read with `npm run dev:token`. A side
+effect settled an open phase 5 item: with 2.8M events in `case_events`, the 400-event history is an
+index scan on `case_events_pkey` (0.06 ms) instead of a sequential scan of a near-empty table that
+proved nothing.
+
+### 2.28 The end-of-phase review found three defects the tests did not
+
+Before committing phase 4, the human asked for a review of everything the phase created. Read as a
+whole, three things were wrong although all 198 tests passed:
+
+- **The sweeper could never run in production.** It loaded the API's whole configuration, so it
+  demanded the JWT secret it never uses, and it inherited the rule that refuses dev auth when
+  `NODE_ENV=production`. As a Lambda or a CronJob it would have failed at start-up. Configuration
+  is now split (D-46): `runtimeEnv()` for every process, `apiEnv()` adds the API's own settings.
+  Verified by running the sweeper with `NODE_ENV=production` and no JWT variable at all.
+- **A report could contradict itself.** Its summary and its page were two queries, each seeing its
+  own committed state; a sweeper batch committing between them would move a case from `at_risk` to
+  `breached` in one half only. Same for a history (the case, then its events). Multi-query reads
+  now run in one read-only `REPEATABLE READ` snapshot (D-47), with a test proving the option reaches
+  PostgreSQL.
+- **A migration cited a document that did not exist** (`docs/PERFORMANCE.md`). The migration is
+  applied, so its text cannot change; the document was written instead, with the measurements.
+
 ---
 
 ## 3. Decision register
@@ -390,13 +486,13 @@ rejected column.
 | ID | Decision | Why | Rejected alternative |
 | --- | --- | --- | --- |
 | **D-1** | Single tenant as an explicit **working hypothesis**. `tenant_id` on every business table; tenant taken only from the verified token. | Costs nothing, keeps the 60+ tenant target shape, enabled by seeding rows. | Tenant administration machinery for a hypothesis the brief does not state. |
-| **D-2** (rev.) | One performance fixture of **1M cases** with a realistic distribution, generated in SQL; a `--rows` flag for 10M. The scaling argument is written down (TRADEOFFS §10). | Report latency depends on the at-risk set size and on the index fitting in memory, not on total rows; a B-tree is 3–4 levels deep at both 1M and 10M. | Three profiles (200k / 2M / 10M) with 10M as the target, which costs a laptop 6–7 GB to prove something the argument already explains. |
+| **D-2** (rev. 3) | **1M cases with their full event history** (2.8M events, invariant 3 holds), generated in SQL **into the development database**, mostly under the Acme dev tenant (`npm run seed:perf`, ~1 min, once; `--rows` for more or fewer), at the **start of phase 4**. `npm run perf:explain` runs the real Drizzle SQL under `EXPLAIN (ANALYZE, BUFFERS)`. | Indexes must be chosen on representative data (2.24); in the dev database the volume is explorable through the API with the same token, and a realistic event log makes the history plan meaningful (2.27). | A separate `triple_perf` database with no events (the first phase-4 version); the fixture in phase 5; 10M as the default on a laptop. |
 | **D-3** (rev.) | `response_windows(scheme, reason_code NULL, window_days, deadline_tz)`, `UNIQUE NULLS NOT DISTINCT (scheme, reason_code)`, changed by migration. The window is **snapshotted onto the case**. | Satisfies `window(scheme, reason_code)` and "windows are data". The snapshot means a reissued window never moves a live deadline. | Effective-dated rows with `EXCLUDE` over date ranges and `btree_gist`: served only late registration across a rule change. `DEADLINE_REVISED` batches are reserved, not built. |
 | **D-4** (rev.) | `amount_minor BIGINT` + `currency CHAR(3)` in the database, ISO 4217 exponent map in code. **The API still accepts and returns `amount_cents`**, plus `amount_minor` and `currency_exponent`. | `amount_cents` is wrong for JPY and KWD, but it is the brief's field and banks consume it. Fixing the model must not break the contract. | Renaming the API field (breaking, 2.12); `double precision`; `NUMERIC`; a fixed two-decimal convention. |
 | **D-5** (rev.) | Static `fx_rates(currency, base_currency, rate, rate_date)`; `amount_base_minor`, `fx_rate`, `fx_rate_date` snapshotted at creation. | The report must order by money across currencies, reproducibly. | Live FX at report time. Production would source rates from scheme settlement or the bank's provisioning rates (TRADEOFFS §15). |
 | **D-6** (rev.) | `deadline_at` = end of day `presentment_date + window_days` in the **window's** zone (`deadline_tz`, default `UTC`). Half-open `instant < deadline_at`. | The obligation is issuer ↔ scheme, so the scheme's calendar anchors it; UTC removes DST; half-open gives a boundary one answer. UTC is an unverified assumption per scheme. | The tenant's time zone (2.15); `timestamptz + interval`; a closed interval. |
 | **D-7** | `actor_type IN ('human','agent','system')`, `actor_id` always set; from the token (user → `human`, machine client → `agent`); `system` only for `DEADLINE_EXPIRED`, enforced by a `CHECK`. | An automatic loss needs an honest actor; the API must not let a client claim to be the system. | The brief's two-value enum. |
-| **D-8** | Rule **predicates in TypeScript**; `tenant_rule_config` holds `enabled` and `priority`. No admin API; changes by migration. | Evaluated text in a table is an attack surface and untestable; order and enablement are data. With corrected predicates, order only decides rule 1 vs rule 3. | Predicates as SQL or a DSL; everything hardcoded. |
+| **D-8** (rev.) | Rule **predicates in TypeScript**; `tenant_rule_config` holds the **order** (`priority`) only, which is what the brief asks for. No admin API; changes by migration. | Evaluated text in a table is an attack surface and untestable; the order is plain data. With corrected predicates, order only decides rule 1 vs rule 3. | Predicates as SQL or a DSL; everything hardcoded; a per-rule on/off switch, which the AI invented and the human removed (2.23). |
 | **D-9** (rev.) | Periodic sweeper over **`OPEN` only**, `FOR UPDATE SKIP LOCKED`, batch, idempotent, `system` actor. | `UNDER_REVIEW` filed evidence in time and cannot lose to the deadline (2.10). | Sweeping `UNDER_REVIEW` too; lazy evaluation on read; `pg_cron`. |
 | **D-10** (rev.) | `case_events` append-only by **grants** (`triple_app`: `SELECT`, `INSERT`), a **trigger** rejecting `UPDATE`/`DELETE`/`TRUNCATE` for every role, and **`ON DELETE RESTRICT`** to `cases`. `metadata JSONB` validated per type, ≤ 16 KB, no personal data. A future "delete" is a `CASE_VOIDED` event. | Audit that a single SQL statement can erase is not audit. | `ON DELETE CASCADE` (deleting a case erased its trail); convention only. |
 | **D-11** (rev.) | **Rules run on write only.** Events store `to_status`, `rule_key`, `ruleset_version`. History folds events with `recorded_at <= as_of` by `seq`, never evaluating a rule. 50 000-event cap with `truncated`. | The past must not depend on today's code or config (2.11). | Re-evaluating rules on read with `clock = as_of`; with `now()` (2.8). |
@@ -411,7 +507,7 @@ rejected column.
 | **D-20** | Conventional commits via commitlint. | The history is a deliverable. | Unvalidated messages. |
 | **D-21** | `postgres:17-alpine`, port 5433, healthcheck, data checksums, CI service container. | Current version; no clash with a local PostgreSQL; integration tests really run in CI. | A cached 16-alpine image. |
 | **D-22** | `SWEEP_INTERVAL_MS`, default 60 000, configurable. | Sweep lag is an SLO. | A hardcoded interval. |
-| **D-23** (rev.) | **sqlfluff 4.4.0 in Docker is the only SQL linter**, layout rules included; `RF04` excluded for `name`/`version`. | One tool, no Python, pinned. | A second pure-Node SQL checker. |
+| **D-23** (rev. 2) | **No SQL linter.** sqlfluff was removed once drizzle-kit started generating the SQL: table changes are generated and verified by `db:schema:check` and the drift test, the few custom migrations are reviewed by eye, and the linter had already needed two rule exclusions (`RF04` for our column names, `RF06` because drizzle-kit quotes identifiers) to stop fighting the code. Every real migration defect so far was caught by tests, none by the linter. | No tool without a use case (AGENTS.md); the human saw no need for it once Drizzle was adopted. | Keeping sqlfluff in CI (first a pure-Node checker as well, phase 0). |
 | **D-24** (rev.) | Prettier does not touch SQL. | It never did (2.14); saying so is the fix. | Claiming Prettier formats SQL. |
 | **D-25** | `POST /cases/:id/transitions { to }` maps `to` to a domain fact; the rules decide; a mismatch is `409` naming the rule; same status is a no-op `200`. | Keeps the brief's vocabulary while `UNDER_REVIEW` keeps its meaning: evidence filed in time. | Clients setting any allowed status. |
 | **D-26** | `seq` = new `cases.version`, taken in the projection `UPDATE`; primary key `(case_id, seq)`. | Concurrency-safe via the row lock, gapless (a gap reveals tampering), and it is the history index. | `MAX(seq)+1`, a global identity, timestamps. |
@@ -423,6 +519,11 @@ rejected column.
 | **D-32** | Secret scanning with **gitleaks v8.30.1 in Docker** over the full history, in CI and as `npm run scan:secrets`. | A maintained scanner instead of 130 lines of local regexes. | The homemade guard script. |
 | **D-33** (rev.) | Runner: SHA-256 checksums, advisory lock, ledger named `triple_migrations`, refusal of a non-empty database without a ledger, `lock_timeout = 5s` for transactional migrations, **no timeouts for concurrent index builds** and cleanup of the `INVALID` index a failed build leaves, forward only. | Safe and auditable against live traffic (2.16). | A uniform `lock_timeout` and a global invalid-index check (2.16); `drizzle-kit` (2.3); a `down` command nobody tests. |
 | **D-34** | Greenfield schema with **live-safe migrations**, plus a written rollout plan for 60+ tenants (`docs/MIGRATION_PLAN.md`). No invented legacy import. | What the brief asks is that our migrations can run on live data. | Modelling and backfilling a hypothetical legacy database (2.13). |
+| **D-47** | Reads made of several queries (the stuck-queue summary and page, a case and its events) run in one **read-only `REPEATABLE READ`** transaction (`transaction(work, { snapshot: true })` on the port). | One state of the database per answer: a report must not contradict itself (2.28). | Default `READ COMMITTED`, where each statement sees its own snapshot. |
+| **D-46** | Configuration in two parts: `runtimeEnv()` (database, logging, sweep interval) for every process, `apiEnv()` adding port and authentication for the HTTP API only; the dev-auth production refusal belongs to the API. | The sweeper must run in production and must not hold a secret it never uses (2.28). | One configuration object for every process. |
+| **D-45** | Report indexes `cases_queue_idx` and `cases_queue_breached_idx`: `(tenant_id, deadline_at)` covering `amount_base_minor`, `status`, `id`, partial on the queue's statuses; added `CONCURRENTLY` as an expand step, the phase 1 indexes dropped later. Status constants are SQL literals in the adapter so the planner can match the partial indexes. | Measured on 1M cases: page 32 ms → 1–3.5 ms, summary index-only (2.24). | An index ordered by amount (23 ms); editing the phase 1 migration. |
+| **D-44** | The sweeper is one function, `sweepDeadlines`, with two entry points: `npm run worker` (loop, this exercise) and `npm run sweep` (one pass). Production runs the one-pass form from a scheduler (EventBridge + Lambda, Kubernetes CronJob) every minute. | One code path whatever the deployment; a scheduler gives retries, history and no idle process (TRADEOFFS §7b). | A sweeper inside the API process; `pg_cron`. |
+| **D-43** | `GET /reports/stuck-queue`: `summary` of `at_risk`, `breached`, `responded` always; `items` of `at_risk,breached` by default, `?state=` for any combination; ordered by base-currency amount then id; opaque keyset cursor; `seconds_to_deadline` per item; frozen v1 contract. | The brief's filter has no lower bound, so answered cases would bury the actionable ones; nothing is hidden, the brief's set is one parameter away (TRADEOFFS §7c). | The brief's literal filter as the default list; dropping responded cases; offset pagination. |
 | **D-42** | The API connects as `triple_api`, a login role in `triple_app`, created by `npm run dev:seed` from `DATABASE_URL`; migrations and the seed use the owner's `MIGRATION_DATABASE_URL`. API tests run as `triple_api` too. | In the running system, not just in a test, the API cannot update or delete the audit trail or immutable case columns. | Connecting as the owner and relying on the trigger alone. |
 | **D-41** | A frozen v1 case contract in `test/contract/case-v1.ts`, written by hand, non-strict, applied to every case response in the API tests. | Proves compatibility instead of promising it: adding a field passes, removing, renaming or retyping one fails. Derived from the code, it would change along with the bug. | The original exit criterion ("adding a field keeps assertions green"), which proved nothing. |
 | **D-40** | One error envelope `{ error: { code, message, details? } }` for every failure, including Zod validation (route default hook), unknown routes and readiness; stable `code` list in `src/http/errors.ts`. | Integrators branch on `code`; one shape means one error handler on their side. | `@hono/zod-openapi`'s default validation response and ad hoc bodies per route. |
@@ -436,18 +537,19 @@ rejected column.
 
 ## 4. What is deliberately unfinished at this stage
 
-Phases 0 to 3 are complete. Recorded so the gaps are explicit rather than discovered by a
+Phases 0 to 4 are complete. Recorded so the gaps are explicit rather than discovered by a
 reviewer:
 
-- **No stuck-queue report and no sweeper yet.** They are phase 4 in
-  [`docs/PHASES.md`](./docs/PHASES.md). Until the sweeper exists, an OPEN case whose deadline passes
-  stays OPEN in the projection; creating a case that is already late, and any transition on it,
-  already apply the deadline rule.
-- **The schema is real and tested**: append-only enforcement, the database clock, role privileges and
-  the runner are covered by `test/schema.integration.test.ts` and `test/migrator.integration.test.ts`
-  against throwaway databases.
-- **No performance number is measured yet.** The 200 ms and 100 ms targets are phase 5 deliverables;
-  until then they are intentions.
+- **Phase 5 is open**: the contract step that drops the phase 1 report indexes, the remaining
+  measurements in `docs/PERFORMANCE.md` (systematic cold and warm runs, 10M) and `docs/SLOS.md`.
+- **Seeded data is recorded at seeding time.** The trigger makes `recorded_at` the database clock, so
+  a seeded case lost to its deadline shows `DEADLINE_EXPIRED` dated at the deadline but
+  `CASE_CREATED` dated today. That is the system refusing to invent the past, as it would for any
+  imported data.
+- **Report and history timings are measured on 1M cases, not 10M.** The scaling argument is in
+  TRADEOFFS §10; the generator takes `--rows 10000000` for whoever wants the run.
+- **The sweeper logs its results but exports no metrics**, and no alert exists yet; both are SLO
+  work in phase 5.
 - **`deadline_tz = 'UTC'` is an assumption** to confirm against each scheme's rulebook.
 - **The FX table is a placeholder** for the exercise (TRADEOFFS §15).
 - **Auth is development-only.** Tokens are minted locally with a shared secret; the server refuses

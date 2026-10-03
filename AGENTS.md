@@ -23,16 +23,17 @@ npm run dev:seed         # API role triple_api + demo tenants acme (EUR), globex
 npm run dev:token        # print a dev bearer token
 npm run db:generate      # migration from a change to src/infrastructure/db/schema
 npm run db:schema:check  # fails if the schema changed without a migration
+npm run worker           # deadline sweeper loop (npm run sweep: one pass)
+npm run seed:perf        # 1M cases + events into the dev database; npm run perf:explain
 npm run typecheck
 npm run lint             # zero warnings
 npm test                 # DB tests skip themselves if PostgreSQL is down
 npm run test:coverage
-npm run lint:sql         # sqlfluff in Docker
 npm run format
 ```
 
 A change is done when `typecheck`, `lint`, `test:coverage`, `format:check` and, if the schema or
-SQL changed, `db:schema:check` and `lint:sql` pass.
+SQL changed, `db:schema:check` pass.
 
 ## Layers
 
@@ -45,7 +46,7 @@ src/infrastructure  Drizzle schema (db/schema), the CaseStore adapter (db/case-s
 src/http            routes, request/response schemas (drizzle-zod + @hono/zod-openapi), auth,
                     error envelope
 src/worker          deadline sweeper
-scripts/            CLIs only: migrate, dev-seed, dev-token (+ dev-tenants), seed-perf. Nothing else.
+scripts/            CLIs only: migrate, dev-seed, dev-token (+ dev-tenants), seed-perf, perf-explain.
 ```
 
 The domain receives `now` as an argument. It never reads a clock.
@@ -130,6 +131,8 @@ Before writing custom infrastructure (a runner, a validator, a query helper, an 
   express, via `npm run db:generate:custom`.
 - **Never query with raw SQL when Drizzle can express it.** `sql` fragments are for what the query
   builder lacks (`now()`, `NULLS LAST`, `version + 1`).
+- **A process reads only the configuration it uses.** `runtimeEnv()` for anything that runs (the
+  sweeper included), `apiEnv()` only in the HTTP API. Never hand a process a secret it does not use.
 - **No `console`** in `src/`; use `logger()` from `src/logger.ts`. Inline `eslint-disable` is ignored
   by config.
 

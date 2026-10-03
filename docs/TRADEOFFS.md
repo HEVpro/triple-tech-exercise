@@ -117,6 +117,43 @@ timing; and showing only open work, which hides the money already lost.
 
 ---
 
+## 7b. The sweeper: one function, a scheduler in production
+
+**Decision.** `sweepDeadlines` processes `OPEN` cases past their deadline in batches of 500, one
+transaction each, `FOR UPDATE SKIP LOCKED`. It has two entry points: `npm run sweep` (one pass) and
+`npm run worker` (a loop every `SWEEP_INTERVAL_MS`, this exercise's default).
+
+**Rejected.** Lazy evaluation on read (the stored status would lie to every other consumer,
+including the report); `pg_cron` (domain logic in SQL); a sweeper inside the API process (its
+health would depend on API load and restarts).
+
+**How it should run in production.** As a scheduled one-shot rather than a resident process: an
+EventBridge rule invoking a Lambda, or a Kubernetes CronJob, running the one-pass form every
+minute. No idle process; retries and run history come from the platform; one minute matches the
+lag SLO. A resident worker is better only if sub-minute lag were required or a pass could not
+finish within the interval. Both call the same function, so the choice is deployment, not code
+(D-44).
+
+**Cost.** Up to one interval of lag between a deadline and its recorded loss. The report closes that
+gap on its side: an `OPEN` case past its deadline is already shown as `breached`.
+
+---
+
+## 7c. The report: everything counted, the actionable listed first
+
+**Decision.** `summary` counts `at_risk`, `breached` and `responded`; `items` list `at_risk` and
+`breached` by default, ordered by money, and `?state=` selects any combination (D-43).
+
+**Rejected.** The brief's filter as the default list: it has no lower bound, so `UNDER_REVIEW` cases
+whose deadline passed months ago (they answered in time and wait for the card network) stay in it
+forever and push the cases the bank can still save down the list. Also rejected: dropping them
+(hides money pending) and an arbitrary lookback for them (no business reason for the cut).
+
+**Cost.** The default view differs from the brief's literal set; the brief's set is
+`?state=at_risk,responded`. Listed as a deviation in §14.
+
+---
+
 ## 8. Transitions: the client asks, the rules decide
 
 **Decision.** `POST /cases/:id/transitions { to }` keeps the brief's vocabulary, but `to` is mapped
@@ -146,9 +183,20 @@ gaps, so a gap is evidence of tampering. `(case_id, seq)` is the primary key and
 
 ## 10. Performance: what the numbers depend on
 
-**Decision.** Partial covering index `(tenant_id, deadline_at) INCLUDE (amount_base_minor, status)
-WHERE status IN ('OPEN','UNDER_REVIEW')`, a second for breaches, `LIMIT` plus keyset pagination.
-Measured on a **1M-case** fixture.
+**Decision.** Partial covering indexes `(tenant_id, deadline_at) INCLUDE (amount_base_minor, status,
+id) WHERE status IN ('OPEN','UNDER_REVIEW')` and the same for deadline losses, a page chosen from the
+indexes alone and only its rows read from the table, keyset pagination. Measured on a **1M-case**
+fixture (`npm run seed:perf`, `npm run perf:explain`):
+
+| Query | Before (phase 1 index) | Now |
+| --- | --- | --- |
+| Report, first page | 32 ms, one table block per case at risk | 1.2 ms warm, 3.5–13.7 ms cold; index-only |
+| Report, later page (cursor) | — | 0.9 ms |
+| Report, summary | 2.2 ms | 1.3 ms; index-only |
+
+The phase 1 index lacked `id`, which the order and the cursor need: it was designed before the query
+it served (NOTES 2.24). An index ordered by amount was also measured and lost (23 ms): most
+deadline losses are old, so walking by amount discards thousands of entries to find last week's.
 
 **Why 1M, not 10M.** A B-tree page holds a few hundred entries, so three levels index ~27M rows: 1M
 and 10M both need three or four page reads to find where a tenant's range starts. After that, the
@@ -164,8 +212,8 @@ cost depends on:
 
 So the report's latency is governed by **the size of the at-risk set and whether the index is in
 memory, not by the table's row count**. The fixture uses a realistic distribution (three years of
-presentments, most cases closed, one large tenant among small ones) and the `EXPLAIN (ANALYZE,
-BUFFERS)` output is committed with it.
+presentments, most cases closed, one large tenant among small ones); the plans and timings are in
+[`PERFORMANCE.md`](./PERFORMANCE.md).
 
 **Cost.** 10M is argued, not measured. Anyone can run the generator at 10M; it is just not the
 default on a laptop.
@@ -189,13 +237,14 @@ a reasonable later defence in depth.
 
 ## 12. Terminal rules: predicates in code, order as data
 
-**Decision.** Predicates are TypeScript; `tenant_rule_config` holds `enabled` and `priority`. No admin
+**Decision.** Predicates are TypeScript; `tenant_rule_config` holds the order (`priority`). No admin
 API; changes by migration.
 
 **Rejected.** Predicates as SQL or a DSL in a table; everything hardcoded.
 
 **Why.** Evaluated text in a table is an injection and privilege-escalation surface and is hard to
-test. Order and enablement are plain data.
+test. The order is plain data. Switching rules off was considered and removed: no rule has a
+valid reason to be off (NOTES 2.23).
 
 **Honest cost.** With the corrected predicates, order matters only between rule 1 and rule 3. The
 configurability the brief asks for exists, but its practical reach is small.
@@ -248,8 +297,9 @@ checksums and a lock. Then the runner is deleted.
 3. **`actor_type` has a third value, `system`.** The sweeper is neither a human nor an agent.
 4. **Rule 1 requires "no evidence before the deadline".** Literally applied, it would auto-lose cases
    that answered in time.
-5. **The report adds `breached` rows and a `deadline_state` column.** The brief's filter is kept
-   verbatim for the rest.
+5. **The report adds `breached` rows and a `deadline_state` column, and lists the actionable states
+   by default.** The brief's exact set is `?state=at_risk,responded`; every state is always counted
+   in `summary` (§7c).
 
 Each is reversible at low cost.
 
