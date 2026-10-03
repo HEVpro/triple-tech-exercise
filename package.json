@@ -29,6 +29,7 @@
     "db:schema:check": "drizzle-kit check && before=$(ls -R migrations | wc -l) && drizzle-kit generate && test \"$(ls -R migrations | wc -l)\" = \"$before\" || (echo \"schema.ts changed without a migration: run npm run db:generate\" && exit 1)",
     "dev:seed": "tsx --env-file-if-exists=.env scripts/dev-seed.ts",
     "dev:token": "tsx --env-file-if-exists=.env scripts/dev-token.ts",
+    "seed:perf": "tsx --env-file-if-exists=.env scripts/seed-perf.ts",
     "prepare": "husky",
     "scan:secrets": "docker run --rm -v \"$PWD:/repo\" -w /repo ghcr.io/gitleaks/gitleaks:v8.30.1 git --no-banner --redact ."
   },
