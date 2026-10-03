@@ -25,6 +25,9 @@
     "db:reset": "docker compose down -v && docker compose up -d --wait",
     "db:migrate": "tsx --env-file-if-exists=.env scripts/migrate.ts up",
     "db:migrate:status": "tsx --env-file-if-exists=.env scripts/migrate.ts status",
+    "db:generate": "drizzle-kit generate",
+    "db:generate:custom": "drizzle-kit generate --custom",
+    "db:schema:check": "drizzle-kit check && before=$(ls -R migrations | wc -l) && drizzle-kit generate && test \"$(ls -R migrations | wc -l)\" = \"$before\" || (echo \"schema.ts changed without a migration: run npm run db:generate\" && exit 1)",
     "prepare": "husky",
     "scan:secrets": "docker run --rm -v \"$PWD:/repo\" -w /repo ghcr.io/gitleaks/gitleaks:v8.30.1 git --no-banner --redact ."
   },

@@ -1,0 +1,12 @@
+-- drizzle-kit baseline. Intentionally applies nothing.
+--
+-- Migrations 0001–0010 were written by hand before the project adopted drizzle-kit, and they are
+-- already applied wherever this schema runs. drizzle-kit generated this file together with
+-- meta/20261003021001_snapshot.json from src/infrastructure/db/schema, so that the snapshot
+-- describes the schema those migrations built. From here on, schema changes are made in
+-- src/infrastructure/db/schema and generated with `npm run db:generate`; only the parts
+-- drizzle-kit cannot express are written by hand, with `drizzle-kit generate --custom` (D-38).
+--
+-- test/schema-drift.integration.test.ts proves the TypeScript schema and 0001–0010 build the same
+-- tables, columns, defaults and constraints.
+SELECT 1;

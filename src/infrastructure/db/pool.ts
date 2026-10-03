@@ -1,11 +1,14 @@
-import { drizzle } from 'drizzle-orm/node-postgres'
+import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { Pool } from 'pg'
 
 import { env } from '../../config/env.js'
 import { logger } from '../../logger.js'
+import * as schema from './schema/index.js'
+
+export type Database = NodePgDatabase<typeof schema>
 
 let pool: Pool | undefined
-let db: ReturnType<typeof drizzle> | undefined
+let db: Database | undefined
 
 export async function closeDbPool(): Promise<void> {
   if (!pool) return
@@ -14,8 +17,8 @@ export async function closeDbPool(): Promise<void> {
   db = undefined
 }
 
-export function database(): ReturnType<typeof drizzle> {
-  db ??= drizzle({ casing: 'snake_case', client: dbPool() })
+export function database(): Database {
+  db ??= drizzle({ client: dbPool(), schema })
   return db
 }
 

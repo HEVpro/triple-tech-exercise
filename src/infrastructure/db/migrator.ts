@@ -28,7 +28,9 @@ export class MigrationError extends Error {
   override name = 'MigrationError'
 }
 
-const FILE_PATTERN = /^(\d{4})_([a-z0-9_]+)\.sql$/
+// NNNN_name.sql for the hand-written 0001–0010; YYYYMMDDHHMMSS_name.sql for drizzle-kit output
+// (migrations.prefix = 'timestamp'). Both sort correctly as strings.
+const FILE_PATTERN = /^(\d{4}|\d{14})_([a-z0-9_]+)\.sql$/
 const NO_TRANSACTION_MARKER = '-- migrate:no-transaction'
 
 // A project-specific name, so the runner never adopts a `schema_migrations` table that
@@ -56,7 +58,7 @@ export async function loadMigrations(directory: string): Promise<Migration[]> {
   for (const file of files) {
     const match = FILE_PATTERN.exec(file)
     if (!match?.[1] || !match[2]) {
-      throw new MigrationError(`${file}: expected NNNN_snake_case.sql`)
+      throw new MigrationError(`${file}: expected NNNN_name.sql or YYYYMMDDHHMMSS_name.sql`)
     }
 
     const [, version, name] = match

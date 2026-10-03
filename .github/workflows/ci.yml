@@ -48,6 +48,9 @@ jobs:
 
       - run: npm run lint
 
+      - name: Schema and migrations agree (drizzle-kit generates nothing new)
+        run: npm run db:schema:check
+
       - name: Apply migrations to the service database, twice, to prove idempotency
         env:
           DATABASE_URL: postgres://triple:triple@localhost:5433/triple
