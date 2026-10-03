@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 import { decideTransition } from '../../../src/domain/dispute/index.js'
-import { resolveRuleOrder } from '../../../src/domain/rules/index.js'
 import {
   afterDeadline,
   analyst,
@@ -74,20 +73,6 @@ describe('transitions: the client asks, the rules decide', () => {
     expect(
       decideTransition({ now: afterDeadline, request: outcome('LOST'), state: state('OPEN') }),
     ).toMatchObject({ event: { ruleKey: 'deadline_passed', to: 'LOST' }, kind: 'accepted' })
-  })
-
-  it('honours a tenant that disabled the automatic loss', () => {
-    const ruleOrder = resolveRuleOrder([
-      { enabled: false, priority: 1, ruleKey: 'deadline_passed' },
-    ])
-    expect(
-      decideTransition({
-        now: afterDeadline,
-        request: outcome('WON'),
-        ruleOrder,
-        state: state('OPEN'),
-      }),
-    ).toMatchObject({ event: { to: 'WON' }, kind: 'accepted' })
   })
 
   it('treats a repeated request as a no-op, so a retry writes nothing', () => {

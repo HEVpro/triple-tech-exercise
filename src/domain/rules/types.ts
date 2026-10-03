@@ -20,7 +20,6 @@ export type Predicate = (facts: CaseFacts, now: Date) => CaseStatus | null
 
 // One tenant_rule_config row.
 export interface RuleConfigEntry {
-  enabled: boolean
   priority: number
   ruleKey: ConfigurableRuleKey
 }

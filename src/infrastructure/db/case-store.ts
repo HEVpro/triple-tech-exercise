@@ -132,14 +132,10 @@ function caseTransaction(tx: Tx): CaseTransaction {
 
     async ruleConfig(tenantId) {
       const rows = await tx
-        .select()
+        .select({ priority: tenantRuleConfig.priority, rule_key: tenantRuleConfig.rule_key })
         .from(tenantRuleConfig)
         .where(eq(tenantRuleConfig.tenant_id, tenantId))
-      return rows.map((row) => ({
-        enabled: row.enabled,
-        priority: row.priority,
-        ruleKey: row.rule_key,
-      }))
+      return rows.map((row) => ({ priority: row.priority, ruleKey: row.rule_key }))
     },
 
     async tenant(id) {

@@ -14,8 +14,8 @@ describe('resolving a tenant rule order', () => {
   it('puts configured rules first, by priority, and keeps the rest in default order', () => {
     expect(
       resolveRuleOrder([
-        { enabled: true, priority: 2, ruleKey: 'deadline_passed' },
-        { enabled: true, priority: 1, ruleKey: 'scheme_outcome' },
+        { priority: 2, ruleKey: 'deadline_passed' },
+        { priority: 1, ruleKey: 'scheme_outcome' },
       ]),
     ).toEqual(['scheme_outcome', 'deadline_passed', 'evidence_filed'])
   })
@@ -23,14 +23,14 @@ describe('resolving a tenant rule order', () => {
   it('rejects a rule configured twice or a priority used twice', () => {
     expect(() =>
       resolveRuleOrder([
-        { enabled: true, priority: 1, ruleKey: 'deadline_passed' },
-        { enabled: true, priority: 2, ruleKey: 'deadline_passed' },
+        { priority: 1, ruleKey: 'deadline_passed' },
+        { priority: 2, ruleKey: 'deadline_passed' },
       ]),
     ).toThrow(RuleConfigError)
     expect(() =>
       resolveRuleOrder([
-        { enabled: true, priority: 1, ruleKey: 'deadline_passed' },
-        { enabled: true, priority: 1, ruleKey: 'scheme_outcome' },
+        { priority: 1, ruleKey: 'deadline_passed' },
+        { priority: 1, ruleKey: 'scheme_outcome' },
       ]),
     ).toThrow(/priority used twice/)
   })

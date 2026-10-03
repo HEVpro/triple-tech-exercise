@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { type CaseFacts, evaluateRules, resolveRuleOrder } from '../../../src/domain/rules/index.js'
+import { type CaseFacts, evaluateRules } from '../../../src/domain/rules/index.js'
 
 const deadlineAt = new Date('2026-02-16T00:00:00.000Z')
 const before = new Date(deadlineAt.getTime() - 1)
@@ -59,14 +59,5 @@ describe('the terminal rules', () => {
     expect(evaluateRules(facts({ evidenceFiledInTime: true }), muchLater).status).toBe(
       'UNDER_REVIEW',
     )
-  })
-
-  it('lets a tenant disable the automatic loss', () => {
-    const order = resolveRuleOrder([{ enabled: false, priority: 1, ruleKey: 'deadline_passed' }])
-    expect(evaluateRules(facts(), after, order)).toEqual({
-      ruleKey: 'default_open',
-      status: 'OPEN',
-    })
-    expect(evaluateRules(facts({ outcome: 'WON' }), after, order).status).toBe('WON')
   })
 })

@@ -4,7 +4,8 @@ import { DEFAULT_RULE_ORDER } from './constants.js'
 import { RuleConfigError } from './errors.js'
 
 // Turns a tenant's tenant_rule_config rows into an evaluation order. Rules without a row keep
-// their default position after the configured ones; disabled rules are dropped.
+// their default position after the configured ones. Configuration changes the order only: no
+// rule can be switched off (NOTES 2.23).
 export function resolveRuleOrder(config: readonly RuleConfigEntry[]): ConfigurableRuleKey[] {
   const seenRules = new Set<ConfigurableRuleKey>()
   const seenPriorities = new Set<number>()
@@ -21,7 +22,6 @@ export function resolveRuleOrder(config: readonly RuleConfigEntry[]): Configurab
 
   const configured = [...config]
     .sort((a, b) => a.priority - b.priority)
-    .filter((entry) => entry.enabled)
     .map((entry) => entry.ruleKey)
   const untouched = DEFAULT_RULE_ORDER.filter((ruleKey) => !seenRules.has(ruleKey))
 
