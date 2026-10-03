@@ -40,6 +40,9 @@ export interface CaseTransaction {
     id: string,
     options?: { forUpdate?: boolean },
   ): Promise<CaseRecord | null>
+  // OPEN cases whose deadline is at or before `now`, oldest deadline first, across all tenants,
+  // locked FOR UPDATE SKIP LOCKED: concurrent sweepers never take the same case.
+  dueForExpiry(now: Date, limit: number): Promise<CaseRecord[]>
   events(caseId: string): Promise<RecordedEvent[]>
   fxRate(currency: string, baseCurrency: string): Promise<FxRateRecord | null>
   // Returns null when (tenant_id, external_ref) already exists; never throws on that conflict.

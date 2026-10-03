@@ -1,6 +1,6 @@
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 
-import { and, asc, eq, isNull, or, sql } from 'drizzle-orm'
+import { and, asc, eq, isNull, lte, or, sql } from 'drizzle-orm'
 
 import type { CaseStore, CaseTransaction, Scheme } from '../../application/cases/index.js'
 import type { RecordedEvent } from '../../domain/events/index.js'
@@ -83,6 +83,17 @@ function caseTransaction(tx: Tx): CaseTransaction {
         .where(and(eq(cases.tenant_id, tenantId), eq(cases.id, id)))
       const [row] = options?.forUpdate ? await query.for('update') : await query
       return row ?? null
+    },
+
+    async dueForExpiry(now, limit) {
+      const rows = await tx
+        .select()
+        .from(cases)
+        .where(and(eq(cases.status, 'OPEN'), lte(cases.deadline_at, now)))
+        .orderBy(asc(cases.deadline_at))
+        .limit(limit)
+        .for('update', { skipLocked: true })
+      return rows
     },
 
     async events(caseId) {
