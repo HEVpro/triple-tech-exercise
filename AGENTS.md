@@ -122,6 +122,40 @@ shared  <-  money, deadline  <-  rules  <-  events  <-  dispute
   run the gates, show the diff summary, and wait. A previous "commit" instruction does not carry
   over to later changes.
 - Conventional commits (`feat:`, `fix:`, `docs:`, `chore:` …), enforced by commitlint.
+
+## Commits
+
+The history is a deliverable: a reviewer should be able to read how the system was built, commit by
+commit. Phases 0–2 were committed one commit per phase and are left as they are (NOTES 2.19); from
+phase 3 on, every commit is atomic.
+
+**One logical change per commit, and every commit leaves the repository green.**
+
+- **Title:** what changes, imperative, scoped, at most 72 characters, understandable without the
+  diff. `feat(domain): compute scheme deadlines with a half-open window`, not
+  `feat(domain): phase 2`.
+- **Body:** why, the alternative rejected if there was one, and the reference (`D-xx`,
+  `NOTES 2.x`). Not a list of files; git already has that.
+- **Tests go in the same commit as the code they test; docs in the same commit as the change they
+  describe.**
+- **If the title needs an "and", or the body a list of topics, it is two commits.**
+- Never rewrite pushed history.
+
+**Workflow**
+
+1. Work through the phase in slices without committing.
+2. Present a **commit plan**: the ordered list of commits, each with its title and files.
+3. The user approves or edits the plan once.
+4. Create the commits in that order, staging by file (or by building each slice in order).
+5. Verify every commit on its own before reporting:
+
+   ```bash
+   git rebase --exec "npm run typecheck && npm run lint && npm test" origin/main
+   ```
+
+   This replays the unpushed commits and runs the gates at each one; it stops at the first commit
+   that is not green. Unchanged commits keep their hashes.
+6. Report the result. The user pushes.
 - Tests that need PostgreSQL create a throwaway database (`test/support/temp-database.ts`); never
   write to the developer's database from a test.
 - Prefer deleting code to adding configuration. If a tool or file has no clear use case, it does not

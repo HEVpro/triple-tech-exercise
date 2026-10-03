@@ -311,6 +311,23 @@ nothing was wrong except the shape.
 public API, a one-way dependency direction, and all of it enforced by ESLint rather than left as a
 convention. The move changed no behaviour: the same 107 assertions pass, only imports changed.
 
+### 2.19 A history that summarised instead of telling
+
+**What happened:** phases 0 to 2 were committed one commit per phase, or per large follow-up:
+`chore: phase 0 foundation` (+7 699 lines), `feat(domain): phase 2 domain core` (+1 605),
+`refactor(domain): organise the domain in blocks…` (57 files). Every commit followed Conventional
+Commits and passed commitlint, and every message was accurate.
+
+**How it was caught:** the human pointed out that the titles could only summarise and the bodies had
+become lists, so the history did not show what had been built or in what order. Commitlint checks
+the format of a message, not whether a commit is one change. A reviewer could not read the phases
+step by step, bisect a regression, or revert one concern without the others.
+
+**Correction:** D-37. From phase 3 on, commits are atomic: one logical change, green on its own, with
+tests and docs alongside the code they belong to. Work is presented as a commit plan the human
+approves once, and each commit is verified individually with `git rebase --exec`. The existing
+history is left intact, as the brief asks, rather than rewritten to look better than it was.
+
 ---
 
 ## 3. Decision register
@@ -355,6 +372,7 @@ rejected column.
 | **D-32** | Secret scanning with **gitleaks v8.30.1 in Docker** over the full history, in CI and as `npm run scan:secrets`. | A maintained scanner instead of 130 lines of local regexes. | The homemade guard script. |
 | **D-33** (rev.) | Runner: SHA-256 checksums, advisory lock, ledger named `triple_migrations`, refusal of a non-empty database without a ledger, `lock_timeout = 5s` for transactional migrations, **no timeouts for concurrent index builds** and cleanup of the `INVALID` index a failed build leaves, forward only. | Safe and auditable against live traffic (2.16). | A uniform `lock_timeout` and a global invalid-index check (2.16); `drizzle-kit` (2.3); a `down` command nobody tests. |
 | **D-34** | Greenfield schema with **live-safe migrations**, plus a written rollout plan for 60+ tenants (`docs/MIGRATION_PLAN.md`). No invented legacy import. | What the brief asks is that our migrations can run on live data. | Modelling and backfilling a hypothetical legacy database (2.13). |
+| **D-37** | **Atomic commits from phase 3 on**: one logical change per commit, each green on its own, tests and docs with the code; imperative scoped titles that stand without the diff; bodies that give the reason and the `D-xx`/`NOTES` reference. Work is proposed as a commit plan approved once, and each commit is verified with `git rebase --exec`. Phases 0–2 stay as committed. | The history is a deliverable and must show how the system was built; small commits can be reviewed, bisected and reverted (2.19). | One commit per phase (what phases 0–2 did); rewriting the pushed history to hide it. |
 | **D-36** | `src/domain` is organised in **blocks** (`shared`, `money`, `deadline`, `rules`, `events`, `dispute`) with fixed file roles (`types`, `constants`, `schemas`, `errors`, `<action>`, `index`). ESLint enforces: import a block only via its `index.ts`; dependencies only in the direction `shared ← money, deadline ← rules ← events ← dispute`; Zod only in `events`. The aggregate block is `dispute`, not `case`, to avoid the reserved word. | You know where a thing lives before opening a file, and the architecture cannot erode silently. Zod stays in the domain for event metadata because that shape is an audit guarantee and duplicating Zod by hand buys nothing (2.18). | Folders by kind (`types/`, `functions/`…), which scatters one concept across four places; flat files (the phase 2 shape); conventions without lint. |
 | **D-35** | Scope: six phases (0–5); no console, no OIDC, no rules admin API, no voiding, no retroactive revisions. | The brief values a working result over breadth. | Seven phases with a console and full auth. |
 
