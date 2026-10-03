@@ -59,22 +59,25 @@ secret scanning moved to gitleaks (D-32).
 
 Pure TypeScript in `src/domain`, no database, no HTTP, no clock.
 
-- `status.ts`: the four states; `WON` and `LOST` are absorbing.
-- `money.ts`: explicit ISO 4217 exponent table (an unknown currency is rejected, not assumed to have
-  two decimals); base-currency conversion in `bigint`, rounding half up.
-- `deadline.ts`: end of day `presentment_date + window_days` in the window's zone, by calendar
-  arithmetic, DST-safe, including zones where midnight is skipped; the single half-open
-  `isWithinDeadline`.
-- `events.ts`: the closed event union with strict per-type metadata schemas; the type encodes that
-  only a note has no deciding rule, and only the system expires a deadline.
-- `rules.ts`: the three configurable predicates plus `default_open`, `RULESET_VERSION`, and the
-  tenant order from `tenant_rule_config`.
-- `case.ts`: `decideCreation` (expires at once if already late), `decideTransition` (accepted, no-op
-  or rejected with the deciding rule), `decideSweep`, `decideNote`, `foldHistory`,
-  `projectionMatchesLog`.
+Organised in blocks, each a folder with fixed file roles and an `index.ts` as its public API
+(AGENTS.md, "Domain structure"):
 
-ESLint now also forbids reading the clock or `Math.random()` in `src/domain`, and coverage for
-`src/domain/**` is held to 100% of lines and functions.
+- `shared/`: the four states (`WON` and `LOST` absorbing) and the actor.
+- `money/`: explicit ISO 4217 exponent table (an unknown currency is rejected, not assumed to have
+  two decimals); base-currency conversion in `bigint`, rounding half up.
+- `deadline/`: `calendar.ts` for date and time-zone arithmetic, DST-safe, including zones where
+  midnight is skipped; `deadline.ts` for end of day `presentment_date + window_days` in the
+  window's zone and the single half-open `isWithinDeadline`.
+- `events/`: the closed catalogue, strict per-type metadata schemas (the only Zod in the domain),
+  and validation; the type encodes that only a note has no deciding rule.
+- `rules/`: one predicate per rule, `evaluateRules`, `RULESET_VERSION`, and the tenant order from
+  `tenant_rule_config`.
+- `dispute/`: the dispute-case aggregate: `create`, `transition` (accepted, no-op or rejected with
+  the deciding rule), `sweep`, `note`, `history` (`foldHistory`, `projectionMatchesLog`).
+
+ESLint forbids reading the clock or `Math.random()` in `src/domain`, enforces the dependency
+direction between blocks and that blocks are only imported through their `index.ts`, and keeps Zod
+inside `events/`. Coverage for `src/domain/**` is held to 100% of lines and functions.
 
 **Exit criteria, met:** every rule tested exactly at the deadline and 1 ms either side; the normal
 path "evidence in time, outcome after the deadline → WON" is a test; history is tested to report a

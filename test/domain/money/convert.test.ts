@@ -5,7 +5,7 @@ import {
   isSupportedCurrency,
   MoneyError,
   toBaseMinor,
-} from '../../src/domain/money.js'
+} from '../../../src/domain/money/index.js'
 
 describe('currency exponents', () => {
   it('knows that not every currency has cents', () => {

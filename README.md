@@ -126,6 +126,22 @@ The rule that matters: `src/domain` cannot import from any outer layer. That is 
 business rules testable without a database, and it is checked on every lint run rather than trusted
 to review.
 
+Inside, the domain is split into blocks, each a folder whose `index.ts` is its public API:
+
+```
+src/domain/
+  shared/    CaseStatus, Actor
+  money/     minor units, ISO 4217, base-currency conversion
+  deadline/  calendar arithmetic and the deadline rule
+  rules/     the terminal rules and a tenant's order
+  events/    the event catalogue, metadata schemas, validation
+  dispute/   the dispute-case aggregate: create, transition, sweep, note, history
+```
+
+Dependencies run one way (`shared ← money, deadline ← rules ← events ← dispute`), and ESLint rejects
+an import that goes the other way or reaches into a block's internal file. The conventions are in
+[`AGENTS.md`](./AGENTS.md#domain-structure).
+
 ### Key decisions
 
 The full register, with rejected alternatives, is in [`NOTES.md`](./NOTES.md).

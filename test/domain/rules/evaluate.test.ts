@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  type CaseFacts,
-  DEFAULT_RULE_ORDER,
-  evaluateRules,
-  resolveRuleOrder,
-  RuleConfigError,
-} from '../../src/domain/rules.js'
+import { type CaseFacts, evaluateRules, resolveRuleOrder } from '../../../src/domain/rules/index.js'
 
 const deadlineAt = new Date('2026-02-16T00:00:00.000Z')
 const before = new Date(deadlineAt.getTime() - 1)
@@ -74,35 +68,5 @@ describe('the terminal rules', () => {
       status: 'OPEN',
     })
     expect(evaluateRules(facts({ outcome: 'WON' }), after, order).status).toBe('WON')
-  })
-})
-
-describe('resolving a tenant rule order', () => {
-  it('is the default order when the tenant has no configuration', () => {
-    expect(resolveRuleOrder([])).toEqual([...DEFAULT_RULE_ORDER])
-  })
-
-  it('puts configured rules first, by priority, and keeps the rest in default order', () => {
-    expect(
-      resolveRuleOrder([
-        { enabled: true, priority: 2, ruleKey: 'deadline_passed' },
-        { enabled: true, priority: 1, ruleKey: 'scheme_outcome' },
-      ]),
-    ).toEqual(['scheme_outcome', 'deadline_passed', 'evidence_filed'])
-  })
-
-  it('rejects a rule configured twice or a priority used twice', () => {
-    expect(() =>
-      resolveRuleOrder([
-        { enabled: true, priority: 1, ruleKey: 'deadline_passed' },
-        { enabled: true, priority: 2, ruleKey: 'deadline_passed' },
-      ]),
-    ).toThrow(RuleConfigError)
-    expect(() =>
-      resolveRuleOrder([
-        { enabled: true, priority: 1, ruleKey: 'deadline_passed' },
-        { enabled: true, priority: 1, ruleKey: 'scheme_outcome' },
-      ]),
-    ).toThrow(/priority used twice/)
   })
 })

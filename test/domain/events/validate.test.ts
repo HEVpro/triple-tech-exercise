@@ -5,7 +5,7 @@ import {
   EventValidationError,
   MAX_NOTE_BYTES,
   validateEventDraft,
-} from '../../src/domain/events.js'
+} from '../../../src/domain/events/index.js'
 
 const analyst = { id: 'analyst-1', type: 'human' } as const
 

@@ -341,11 +341,11 @@ Each is a property a test asserts, not a comment. Schema-level ones are tested i
 5. Reading history never evaluates a rule. It folds stored events with `recorded_at <= as_of`, by
    `seq`. *(domain: `foldHistory` takes no rules; tested with a decision today's rules would not
    make)*
-6. In-window is `instant < deadline_at`, half-open, defined once in `src/domain/deadline.ts`.
+6. In-window is `instant < deadline_at`, half-open, defined once in `src/domain/deadline/deadline.ts`.
    *(domain: 1 ms before, at, and after — tested)*
 7. A tenant comes from the verified claim only. A cross-tenant read returns `404`, not `403`.
 8. Money is integer minor units plus a currency. No floating point touches an amount. *(domain:
-   `bigint` throughout `money.ts` — tested)*
+   `bigint` throughout `src/domain/money` — tested)*
 9. Every write to `cases` writes an event in the same transaction, with `seq = version`.
 10. `recorded_at` is the database clock; clients cannot backdate. *(schema: trigger + check — tested)*
 

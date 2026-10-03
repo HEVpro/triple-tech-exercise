@@ -27,6 +27,86 @@ const DOMAIN_FORBIDDEN_PACKAGES = {
   message: 'src/domain must stay pure: no infrastructure, no I/O, no runtime globals.',
 }
 
+// ---------------------------------------------------------------------------------------------
+// Domain architecture (AGENTS.md, "Domain structure").
+//
+// src/domain is split into blocks. Each block is a folder whose index.ts is its public API.
+// Three rules keep it that way:
+//   1. Outside a block, only its index.ts may be imported (DOMAIN_PUBLIC_API_ONLY and the
+//      relative-path variant inside domainBlock).
+//   2. Blocks depend on each other in one direction only (DOMAIN_BLOCK_DEPENDENCIES).
+//   3. Zod is allowed in the events block only.
+// To add a block: create the folder with an index.ts and add one line below.
+// ---------------------------------------------------------------------------------------------
+
+// Which blocks each block may import. Anything not listed is a lint error. The resulting
+// direction is: shared <- money, deadline <- rules <- events <- dispute.
+/** @type {Record<string, readonly string[]>} */
+const DOMAIN_BLOCK_DEPENDENCIES = {
+  deadline: ['shared'],
+  dispute: ['shared', 'money', 'deadline', 'rules', 'events'],
+  events: ['shared', 'rules'],
+  money: ['shared'],
+  rules: ['shared', 'deadline'],
+  shared: [],
+}
+
+const DOMAIN_BLOCKS_WITH_ZOD = new Set(['events'])
+
+// From anywhere outside src/domain: `.../domain/<block>/<file>` is only allowed for index.js.
+const DOMAIN_PUBLIC_API_ONLY = {
+  message: 'Import a domain block through its index.ts, never one of its internal files.',
+  regex: String.raw`(^|/)domain/[^/]+/(?!index\.js$)[^/]+$`,
+}
+
+const DOMAIN_OUTER_LAYERS = {
+  group: [
+    '**/infrastructure/**',
+    '**/http/**',
+    '**/worker/**',
+    '**/config/**',
+    '**/application/**',
+  ],
+  message: 'src/domain must not depend on outer layers.',
+}
+
+// ESLint replaces, rather than merges, a rule's options when several config objects match the
+// same file, so each block's config restates the domain-wide restrictions.
+/**
+ * @param {string} block
+ * @param {readonly string[]} allowed
+ */
+function domainBlock(block, allowed) {
+  const forbidden = Object.keys(DOMAIN_BLOCK_DEPENDENCIES).filter(
+    (other) => other !== block && !allowed.includes(other),
+  )
+  const patterns = [
+    DOMAIN_FORBIDDEN_PACKAGES,
+    DOMAIN_OUTER_LAYERS,
+    {
+      message: `Import another domain block through its index.ts (../<block>/index.js).`,
+      regex: String.raw`^\.\./(?!\.\.)[^/]+/(?!index\.js$)`,
+    },
+  ]
+  if (forbidden.length > 0) {
+    patterns.push({
+      message: `src/domain/${block} may only depend on: ${allowed.length > 0 ? allowed.join(', ') : 'nothing'}.`,
+      regex: String.raw`^\.\./(${forbidden.join('|')})/`,
+    })
+  }
+  if (!DOMAIN_BLOCKS_WITH_ZOD.has(block)) {
+    patterns.push({
+      group: ['zod'],
+      message: `Zod belongs to the events block only (events/schemas.ts).`,
+    })
+  }
+  return {
+    files: [`src/domain/${block}/**/*.ts`],
+    name: `domain/${block}`,
+    rules: { 'no-restricted-imports': ['error', { patterns }] },
+  }
+}
+
 export default defineConfig(
   {
     ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'docs/**/*.md'],
@@ -87,21 +167,15 @@ export default defineConfig(
   },
 
   {
+    files: ['**/*.ts'],
+    name: 'layering/domain-public-api',
+    rules: { 'no-restricted-imports': ['error', { patterns: [DOMAIN_PUBLIC_API_ONLY] }] },
+  },
+
+  {
     files: ['src/domain/**/*.ts'],
-    name: 'layering/domain',
+    name: 'domain/purity',
     rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            DOMAIN_FORBIDDEN_PACKAGES,
-            {
-              group: ['**/infrastructure/**', '**/http/**', '**/worker/**', '**/config/**'],
-              message: 'src/domain must not depend on outer layers.',
-            },
-          ],
-        },
-      ],
       // The domain receives `now` as an argument. Reading a clock here would make decisions
       // untestable at the boundary and different on every app instance.
       'no-restricted-syntax': [
@@ -122,6 +196,10 @@ export default defineConfig(
     },
   },
 
+  ...Object.entries(DOMAIN_BLOCK_DEPENDENCIES).map(([block, allowed]) =>
+    domainBlock(block, allowed),
+  ),
+
   {
     files: ['src/application/**/*.ts'],
     name: 'layering/application',
@@ -130,6 +208,7 @@ export default defineConfig(
         'error',
         {
           patterns: [
+            DOMAIN_PUBLIC_API_ONLY,
             {
               group: ['**/http/**', '**/worker/**'],
               message: 'src/application must not depend on delivery layers.',

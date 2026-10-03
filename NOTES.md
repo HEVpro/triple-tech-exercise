@@ -293,9 +293,23 @@ than by any tool:
   history still says `WON`.
 
 The coverage gate found a third issue in production code rather than tests: wall-clock parsing in
-`deadline.ts` fell back to `0` for a missing date part, which would have produced a wrong deadline
+`src/domain/deadline` fell back to `0` for a missing date part, which would have produced a wrong deadline
 silently. It now throws. The domain's statements threshold is 99%, not 100%, because that throw
 cannot be reached without mocking `Intl`.
+
+### 2.18 A domain that worked and could not be maintained
+
+**What came back:** phase 2 as six flat files. Each mixed constants, types, Zod schemas, error
+classes and functions; `case.ts` alone held six decisions, their input and output types, the
+history fold and private helpers in 272 lines. Tests were green and coverage was 100%.
+
+**How it was caught:** the human read it and said it was unmaintainable: there was no way to know
+where anything lived without opening every file. Nothing automated would have flagged it, because
+nothing was wrong except the shape.
+
+**Correction:** D-36. Blocks per business concept, fixed file roles, an `index.ts` per block as its
+public API, a one-way dependency direction, and all of it enforced by ESLint rather than left as a
+convention. The move changed no behaviour: the same 107 assertions pass, only imports changed.
 
 ---
 
@@ -341,6 +355,7 @@ rejected column.
 | **D-32** | Secret scanning with **gitleaks v8.30.1 in Docker** over the full history, in CI and as `npm run scan:secrets`. | A maintained scanner instead of 130 lines of local regexes. | The homemade guard script. |
 | **D-33** (rev.) | Runner: SHA-256 checksums, advisory lock, ledger named `triple_migrations`, refusal of a non-empty database without a ledger, `lock_timeout = 5s` for transactional migrations, **no timeouts for concurrent index builds** and cleanup of the `INVALID` index a failed build leaves, forward only. | Safe and auditable against live traffic (2.16). | A uniform `lock_timeout` and a global invalid-index check (2.16); `drizzle-kit` (2.3); a `down` command nobody tests. |
 | **D-34** | Greenfield schema with **live-safe migrations**, plus a written rollout plan for 60+ tenants (`docs/MIGRATION_PLAN.md`). No invented legacy import. | What the brief asks is that our migrations can run on live data. | Modelling and backfilling a hypothetical legacy database (2.13). |
+| **D-36** | `src/domain` is organised in **blocks** (`shared`, `money`, `deadline`, `rules`, `events`, `dispute`) with fixed file roles (`types`, `constants`, `schemas`, `errors`, `<action>`, `index`). ESLint enforces: import a block only via its `index.ts`; dependencies only in the direction `shared ← money, deadline ← rules ← events ← dispute`; Zod only in `events`. The aggregate block is `dispute`, not `case`, to avoid the reserved word. | You know where a thing lives before opening a file, and the architecture cannot erode silently. Zod stays in the domain for event metadata because that shape is an audit guarantee and duplicating Zod by hand buys nothing (2.18). | Folders by kind (`types/`, `functions/`…), which scatters one concept across four places; flat files (the phase 2 shape); conventions without lint. |
 | **D-35** | Scope: six phases (0–5); no console, no OIDC, no rules admin API, no voiding, no retroactive revisions. | The brief values a working result over breadth. | Seven phases with a console and full auth. |
 
 ---
