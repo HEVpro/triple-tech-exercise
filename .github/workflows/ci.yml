@@ -1,0 +1,78 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: typecheck, lint, test, build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: triple
+          POSTGRES_PASSWORD: triple
+          POSTGRES_USER: triple
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U triple -d triple"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          cache: npm
+          node-version-file: .nvmrc
+
+      - run: npm ci
+
+      - run: npm run format:check
+
+      - run: npm run guard:console
+
+      - run: npm run guard:secrets
+
+      - run: npm run typecheck
+
+      - run: npm run lint
+
+      - run: npm run test
+
+      - run: npm run test:coverage
+
+      - run: npm run build
+
+  sql-lint:
+    name: sql lint (sqlfluff in docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run sqlfluff via docker
+        run: npm run lint:sql
+
+  commitlint:
+    name: commit message lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - run: npx --yes @commitlint/cli --from origin/main --to HEAD --verbose

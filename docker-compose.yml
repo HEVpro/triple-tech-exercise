@@ -1,0 +1,44 @@
+name: triple-dispute
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: triple-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: triple
+      POSTGRES_PASSWORD: triple
+      POSTGRES_DB: triple
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - '5433:5432'
+    volumes:
+      - triple-postgres-data:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - timezone=UTC
+      - -c
+      - log_timezone=UTC
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U triple -d triple -h 127.0.0.1']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    tmpfs:
+      - /tmp
+
+volumes:
+  triple-postgres-data:
+    name: triple-postgres-data

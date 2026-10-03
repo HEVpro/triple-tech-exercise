@@ -1,0 +1,4 @@
+npm run guard:console
+npm run typecheck
+npm run lint
+npm run build

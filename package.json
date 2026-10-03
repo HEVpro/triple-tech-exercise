@@ -1,0 +1,86 @@
+{
+  "name": "triple-dispute",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Dispute case platform for an issuer's chargeback operations team",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --env-file-if-exists=.env dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint:sql": "docker run --rm -v \"$PWD:/workspace\" -w /workspace ghcr.io/sqlfluff/sqlfluff:latest lint --dialect postgres --exclude-rules LT01,LT02,LT03,LT04,LT05,LT06,LT07,LT08,LT09,LT10,LT11,LT12,LT13,LT14 migrations/ scripts/sql/",
+    "lint:sql:node": "tsx scripts/lint-sql.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:reset": "docker compose down -v && docker compose up -d --wait",
+    "db:check": "tsx --env-file-if-exists=.env scripts/db-check.ts",
+    "db:migrate": "tsx --env-file-if-exists=.env scripts/migrate.ts up",
+    "db:migrate:status": "tsx --env-file-if-exists=.env scripts/migrate.ts status",
+    "bench:smoke": "tsx --env-file-if-exists=.env scripts/bench.ts --rows 200000",
+    "bench:full": "tsx --env-file-if-exists=.env scripts/bench.ts --rows 2000000",
+    "bench:spec": "tsx --env-file-if-exists=.env scripts/bench.ts --rows 10000000",
+    "prepare": "husky",
+    "guard:secrets": "tsx scripts/repo-guards.ts secrets",
+    "guard:console": "tsx scripts/repo-guards.ts console"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,mts,cts}": [
+      "eslint --fix --max-warnings 0",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ],
+    "*.sql": [
+      "prettier --write"
+    ],
+    "*": [
+      "tsx scripts/repo-guards.ts secrets"
+    ]
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.3",
+    "@hono/zod-openapi": "^1.6.3",
+    "@prometheus-io/client": "^0.16.1",
+    "@scalar/hono-api-reference": "^0.12.9",
+    "drizzle-orm": "^0.45.3",
+    "hono": "^4.13.12",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.3",
+    "@commitlint/config-conventional": "^21.2.3",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1",
+    "@vitest/coverage-v8": "^5.0.3",
+    "eslint": "^10.12.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-perfectionist": "^5.12.1",
+    "globals": "^17.13.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "node-sql-parser": "^5.4.0",
+    "pino-pretty": "^13.1.3",
+    "prettier": "^3.9.9",
+    "sql-formatter": "^15.9.0",
+    "tsx": "^4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.71.0",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
+  }
+}
