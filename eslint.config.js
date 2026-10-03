@@ -213,6 +213,11 @@ export default defineConfig(
               group: ['**/http/**', '**/worker/**'],
               message: 'src/application must not depend on delivery layers.',
             },
+            {
+              group: ['**/infrastructure/**'],
+              message:
+                'src/application depends on ports (application/*/ports.ts), never on the adapters that implement them.',
+            },
           ],
         },
       ],
