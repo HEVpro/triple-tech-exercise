@@ -6,6 +6,14 @@ The exercise brief explicitly asks for the transcript of the agent that actually
 values most "the prompts that failed and how you caught the bad output". This file is the honest
 version of that: what was asked, what came back, and what had to be corrected by hand.
 
+**The transcript itself is in [`docs/transcript.md`](./docs/transcript.md)**: every prompt and every
+answer of the session that built phases 0 to 4, in order, with one line per action the agent took.
+It was exported from the Claude Code session and converted to Markdown; tool outputs and the
+agent's internal reasoning are left out, which is what makes 7.9 MB of raw log readable in about
+4 000 lines. Section 2 below is the index into it: each failure is told there, and can be found in
+the transcript at the point where the human caught it. The conversation is in Spanish, as it
+happened.
+
 ---
 
 ## 1. The working method

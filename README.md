@@ -533,5 +533,6 @@ performance write-up at scale and the SLOs. What is deliberately unfinished is l
 | [`docs/MIGRATION_PLAN.md`](./docs/MIGRATION_PLAN.md) | Migrations against live data for 60+ tenants |
 | [`docs/PERFORMANCE.md`](./docs/PERFORMANCE.md) | Measured plans and timings for review scenarios 3 and 4 |
 | [`NOTES.md`](./NOTES.md) | How AI was used, failed prompts, decision register, open gaps |
+| [`docs/transcript.md`](./docs/transcript.md) | The agent transcript: every prompt, answer and action, in order |
 | [`AGENTS.md`](./AGENTS.md) | Rules for coding agents |
 | [`migrations/README.md`](./migrations/README.md) | Migration conventions, drizzle-kit workflow and the runner |
