@@ -1,13 +1,13 @@
 import { serve } from '@hono/node-server'
 
-import { env } from './config/env.js'
+import { apiEnv } from './config/env.js'
 import { createApp } from './http/app.js'
 import { postgresCaseStore } from './infrastructure/db/case-store.js'
 import { closeDbPool, database, dbPool } from './infrastructure/db/pool.js'
 import { logger } from './logger.js'
 import { SERVICE_NAME, VERSION } from './version.js'
 
-const config = env()
+const config = apiEnv()
 const log = logger()
 
 const app = createApp({

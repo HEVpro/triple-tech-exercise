@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { env, resetEnvCache } from '../src/config/env.js'
+import { apiEnv, resetEnvCache, runtimeEnv } from '../src/config/env.js'
 
 afterEach(() => {
   resetEnvCache()
@@ -19,9 +19,9 @@ function withEnv(overrides: Record<string, string>, check: () => void): void {
   }
 }
 
-describe('env schema', () => {
+describe('API configuration', () => {
   it('parses a complete environment and applies defaults', () => {
-    expect(env()).toMatchObject({
+    expect(apiEnv()).toMatchObject({
       AUTH_MODE: 'dev',
       DATABASE_POOL_MAX: 10,
       DATABASE_SSL: false,
@@ -32,31 +32,46 @@ describe('env schema', () => {
 
   it('rejects a database url that is not a url', () => {
     withEnv({ DATABASE_URL: 'not-a-url' }, () => {
-      expect(() => env()).toThrow()
+      expect(() => apiEnv()).toThrow()
     })
   })
 
   it('rejects an unknown log level', () => {
     withEnv({ LOG_LEVEL: 'verbose' }, () => {
-      expect(() => env()).toThrow()
+      expect(() => apiEnv()).toThrow()
     })
   })
 
   it('coerces a numeric string sweep interval', () => {
     withEnv({ SWEEP_INTERVAL_MS: '1500' }, () => {
-      expect(env().SWEEP_INTERVAL_MS).toBe(1500)
+      expect(apiEnv().SWEEP_INTERVAL_MS).toBe(1500)
     })
   })
 
   it('rejects a short JWT secret', () => {
     withEnv({ JWT_SECRET: 'too-short' }, () => {
-      expect(() => env()).toThrow(/at least 32 characters/)
+      expect(() => apiEnv()).toThrow(/at least 32 characters/)
     })
   })
 
   it('refuses to start with dev auth in production', () => {
     withEnv({ NODE_ENV: 'production' }, () => {
-      expect(() => env()).toThrow(/refused when NODE_ENV=production/)
+      expect(() => apiEnv()).toThrow(/refused when NODE_ENV=production/)
+    })
+  })
+})
+
+describe('runtime configuration (what the sweeper reads)', () => {
+  it('needs no authentication settings', () => {
+    withEnv({ JWT_AUDIENCE: '', JWT_ISSUER: '', JWT_SECRET: '' }, () => {
+      expect(runtimeEnv()).toMatchObject({ SWEEP_INTERVAL_MS: 60_000 })
+    })
+  })
+
+  it('starts in production, where the dev-only API refuses to', () => {
+    withEnv({ NODE_ENV: 'production' }, () => {
+      expect(runtimeEnv().NODE_ENV).toBe('production')
+      expect(() => apiEnv()).toThrow(/refused when NODE_ENV=production/)
     })
   })
 })

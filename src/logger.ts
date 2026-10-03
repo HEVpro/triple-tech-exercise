@@ -1,6 +1,6 @@
 import pino, { type Logger } from 'pino'
 
-import { env } from './config/env.js'
+import { runtimeEnv } from './config/env.js'
 
 const redactedPaths = [
   'req.headers.authorization',
@@ -21,7 +21,7 @@ export function logger(): Logger {
 }
 
 function build(): Logger {
-  const config = env()
+  const config = runtimeEnv()
   const pretty = config.NODE_ENV === 'development'
 
   return pino({

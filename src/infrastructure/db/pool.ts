@@ -1,7 +1,7 @@
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { Pool } from 'pg'
 
-import { env } from '../../config/env.js'
+import { runtimeEnv } from '../../config/env.js'
 import { logger } from '../../logger.js'
 import * as schema from './schema/index.js'
 
@@ -25,10 +25,10 @@ export function database(): Database {
 export function dbPool(): Pool {
   pool ??= new Pool({
     application_name: 'triple-dispute-api',
-    connectionString: env().DATABASE_URL,
+    connectionString: runtimeEnv().DATABASE_URL,
     idleTimeoutMillis: 30_000,
-    max: env().DATABASE_POOL_MAX,
-    ssl: env().DATABASE_SSL ? { rejectUnauthorized: false } : false,
+    max: runtimeEnv().DATABASE_POOL_MAX,
+    ssl: runtimeEnv().DATABASE_SSL ? { rejectUnauthorized: false } : false,
   })
 
   pool.on('error', (error: Error) => {
