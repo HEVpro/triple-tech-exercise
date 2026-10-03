@@ -1,228 +1,120 @@
 # Delivery Phases
 
-The exercise is large enough that building it in one pass produces a codebase nobody can review. It
-is therefore delivered in seven phases, each of which leaves the repository in a working state with
-its gates green.
+Each phase leaves the repository working with its gates green. The plan was cut from seven phases to
+six (0 to 5) after a scope review: the console, OIDC and effective-dated windows were dropped or
+deferred (NOTES 2.13).
 
-The phases are ordered so that the highest-risk decisions are made first, against real evidence,
-rather than at the end. Two of them exist purely to produce evidence for a decision that is
-deliberately deferred: partitioning (D-13) and the report index strategy.
-
-Current status: **phase 0 complete**, phases 1 to 6 not started.
+Current status: **phases 0 and 1 complete.**
 
 ---
 
 ## Phase map
 
-| Phase | Delivers | Primary risk retired |
-| --- | --- | --- |
-| 0 | Repository, toolchain, gates, PostgreSQL container | Can a reviewer run this at all |
-| 1 | Schema, migration runner, migrations | Can we change live data safely |
-| 2 | Domain core and terminal rules | Is the business logic auditable |
-| 3 | Case API including `as_of` history | Do we reconstruct history truthfully |
-| 4 | Auth and tenant isolation | Can a tenant see another tenant's data |
-| 5 | Stuck-queue report and deadline sweeper | Do we find at-risk work in time |
-| 6 | Performance evidence, SLOs, optional console | Does it hold at 10M rows |
-
-Phases 3 and 4 could be swapped. They are kept in this order because auth changes the shape of every
-handler, and it is cheaper to add it to three endpoints than to retrofit it across a growing surface.
+| Phase | Delivers | Risk retired | Status |
+| --- | --- | --- | --- |
+| 0 | Repository, toolchain, gates, PostgreSQL container | Can a reviewer run this at all | done |
+| 1 | Schema, migration runner, migration plan | Can we change live data safely; is the audit trail enforced by the database | done |
+| 2 | Domain core: money, deadline, rules, events | Is the business logic correct and auditable | next |
+| 3 | Case API with dev auth and tenant isolation | Do we keep the bank contract and reconstruct history truthfully | |
+| 4 | Stuck-queue report and deadline sweeper | Do we find the money before the deadline does | |
+| 5 | Performance evidence and SLOs | Does it hold at scale, measured | |
 
 ---
 
-## Phase 0: Foundation — complete
+## Phase 0: Foundation — done
 
-**Goal:** a reviewer can clone the repository and have a running, verifiable service in one command.
+TypeScript, Hono, Zod, Pino, Vitest, PostgreSQL 17 in Docker. ESLint `strictTypeChecked` with layer
+boundaries, Prettier, commitlint, husky hooks, `/healthz`, `/readyz`, `/metrics`, `/docs`.
 
-**Delivered:**
-
-- TypeScript, Hono, Zod, Pino, Vitest, Drizzle, PostgreSQL 17 in Docker.
-- ESLint `strictTypeChecked` with layer boundaries and a `console` ban, Prettier as the single
-  formatter, commitlint, husky `pre-commit` and `pre-push`.
-- Credential and `console` guards, duplicated into CI so they do not depend on local hooks.
-- Coverage thresholds, four test files, `/healthz`, `/readyz`, `/metrics`, `/docs`.
-- `README.md`, `NOTES.md`, `migrations/README.md`, and the documents in `docs/`.
-
-**Exit criteria, all met:** `format:check`, `guard:console`, `guard:secrets`, `typecheck`, `lint`,
-`test`, `test:coverage`, `build`, `lint:sql` and `lint:sql:node` pass on a clean tree; both husky
-hooks verified to fail a bad commit and pass a good one; `npm install` succeeds without flags and
-without Python installed.
+Trimmed afterwards: the homemade guards, the second SQL linter and `db-check` were removed;
+secret scanning moved to gitleaks (D-32).
 
 ---
 
-## Phase 1: Schema and migrations
+## Phase 1: Schema and migrations — done
 
-**Goal:** the data model a regulator could audit, and a migration path that is safe against live data
-for 60+ tenants.
+**Delivered**
 
-**Deliverables:**
+- `migrations/0001` to `0010`: role, tenants, response windows, FX rates, cases, case events, rule
+  config, and three indexes built `CONCURRENTLY`.
+- Migration runner (`src/infrastructure/db/migrator.ts`, CLI `scripts/migrate.ts`): ordered files,
+  SHA-256 checksums, advisory lock, `lock_timeout`, per-migration transaction control, invalid-index
+  check. `npm run db:migrate` and `db:migrate:status`.
+- [`MIGRATION_PLAN.md`](./MIGRATION_PLAN.md): the live-data plan the brief asks for.
+- Tests on a throwaway database per run: runner behaviour, append-only enforcement, clocks, role
+  privileges, response-window uniqueness.
 
-- `0001_extensions.sql`, `0002_tenants_and_response_windows.sql`, `0003_cases.sql`,
-  `0004_case_events.sql`, `0005_rule_config.sql`, `0006_report_indexes.sql`, plus a rollback note per
-  migration.
-- `scripts/migrate.ts`: applies in filename order, records `schema_migrations` with a checksum,
-  supports **per-migration transaction control** (D-14) so `CREATE INDEX CONCURRENTLY` can be
-  expressed in the migration system rather than by hand.
-- `npm run db:migrate`, `db:migrate:status`, `db:rollback`.
-- The live-data migration plan the brief asks for as a README deliverable, in
-  `migrations/LIVE-DATA-PLAN.md`.
-- Partial index for the stuck-queue report, created `CONCURRENTLY`.
+**Exit criteria, met**
 
-**Exit criteria:**
-
-- A second PostgreSQL can be created from an empty volume with one command.
-- Every migration has a documented rollback or an explicit, justified statement that it is
-  irreversible.
-- The runner proves the non-transactional path with at least one `CONCURRENTLY` migration.
-- Downtime for the live-data plan is stated in minutes, not adjectives.
-
-**Decisions applied:** D-1, D-3, D-4, D-6, D-7, D-10, D-14, D-21.
-
-**Watch out for:** the brief's `amount_cents` is renamed to `amount_minor` here, and every later phase
-uses the new name. Doing this in phase 1 rather than phase 3 avoids a second migration.
+- An empty database is fully migrated with one command, and a second run applies nothing (also in
+  CI).
+- Every migration states its rollback or why it is irreversible.
+- The no-transaction path is exercised by three `CONCURRENTLY` migrations.
+- Downtime for the plan is stated: none planned, locks bounded by `lock_timeout`.
 
 ---
 
 ## Phase 2: Domain core
 
-**Goal:** all business logic in pure TypeScript with no database and no HTTP, so it can be tested
-exhaustively and read without infrastructure.
+Pure TypeScript in `src/domain`, no database, no HTTP.
 
-**Deliverables:**
+- `money.ts`: ISO 4217 exponents, `amount_minor` ↔ `amount_cents`, base-currency conversion with a
+  snapshotted rate, no floating point on amounts.
+- `deadline.ts`: end of day `presentment_date + window_days` in the window's zone; the single
+  half-open `isWithinDeadline`.
+- `events.ts`: the closed `CaseEvent` union with per-type metadata schemas and the 16 KB cap.
+- `rules.ts`: the four rules, each returning status and `rule_key`; tenant order applied.
+- `case.ts`: transition decision (`to` → event or rejection with the deciding rule); history fold.
 
-- `src/domain/money.ts`: minor-unit conversion driven by an ISO 4217 exponent map (D-4).
-- `src/domain/deadline.ts`: `deadline_at` from `presentment_date + window_days` at end of day in the
-  tenant's IANA timezone, DST-safe, half-open interval (D-6).
-- `src/domain/events.ts`: the closed `CaseEvent` discriminated union with per-type metadata schemas
-  and the 16 KB cap (D-10).
-- `src/domain/terminal-rules.ts`: ordered predicates `deadlinePassed`, `evidenceFiled`,
-  `schemeOutcome`, defaulting to `OPEN`, each returning the status *and* the rule that produced it
-  (D-8, D-11).
-- `src/domain/case.ts`: the state machine and its invariants.
-
-**Exit criteria:**
-
-- Zero imports from `http`, `infrastructure` or `pg` in `src/domain`, enforced by ESLint (D-16).
-- Every rule has a unit test including the boundary: exactly at the deadline, one millisecond before,
-  one millisecond after.
-- The `as_of` invariant is asserted in a test: replaying with `clock = as_of` differs from replaying
-  with `now()` for at least one fixture, which is the defect described in `NOTES.md` 2.8.
-
-**Decisions applied:** D-4, D-6, D-8, D-10, D-11.
+**Exit criteria:** every rule tested at the boundary (exactly at the deadline, 1 ms before, 1 ms
+after); the normal path "evidence in time, outcome after the deadline → WON" is a test; the history
+fold is tested to ignore rule changes.
 
 ---
 
-## Phase 3: Case API
+## Phase 3: Case API with dev auth
 
-**Goal:** the endpoint set the brief requires, with contracts that do not break existing integrations.
+- `POST /cases`, `GET /cases/:id`, `GET /cases?external_ref=`, `POST /cases/:id/transitions`,
+  `POST /cases/:id/notes`, `GET /cases/:id/history?as_of=`.
+- One Zod schema per endpoint for validation, typing and OpenAPI.
+- `amount_cents` accepted and returned alongside `amount_minor` and `currency_exponent`.
+- Dev auth: locally minted HS256 tokens, refused when `NODE_ENV=production`; tenant and actor from
+  the claims only.
+- The application connects as a login role that is a member of `triple_app`.
 
-**Deliverables:**
-
-- `POST /v1/cases`, `GET /v1/cases/:external_ref`, `POST /v1/cases/:external_ref/transitions`,
-  `GET /v1/cases/:external_ref/history?as_of=`.
-- One Zod schema per endpoint, shared between request validation, response typing and the OpenAPI
-  document, so the contract cannot drift from the handler.
-- Idempotency key on case creation, so a retried bank request does not create a duplicate case.
-- Versioned response envelope with additive-only field changes.
-
-**Exit criteria:**
-
-- `POST`, `GET`, transition and history exercised with cURL commands that are committed to the README.
-- The history endpoint reconstructs a case at a past instant for a case with 400 events, and the
-  reconstruction is asserted event by event, not by eyeballing a status string.
-- A response shape change is demonstrated to be backward compatible by adding a field in a test and
-  showing existing assertions still pass.
-
-**Decisions applied:** D-3, D-7, D-11, D-12.
+**Exit criteria:** cURL examples in the README; cross-tenant read returns `404` and the test fails if
+the tenant is read from anywhere but the claim; a 400-event case reconstructed event by event;
+adding a response field keeps existing assertions green.
 
 ---
 
-## Phase 4: Auth and tenant isolation
+## Phase 4: Stuck-queue report and sweeper
 
-**Goal:** a case's tenant comes from a verified credential and nowhere else.
+- `GET /reports/stuck-queue` with `risk_window_days` (default 7), `deadline_state`, `LIMIT` and keyset
+  pagination.
+- `src/worker/sweeper.ts`: `OPEN` cases past their deadline, `FOR UPDATE SKIP LOCKED`, batch,
+  idempotent, `system` actor, `SWEEP_INTERVAL_MS`.
 
-**Deliverables:**
-
-- JWT verification with `jose` against a JWKS, issuer and audience checked, on every request (D-12).
-- `AUTH_MODE=dev` mints local HS256 tokens; that code path refuses to start when `NODE_ENV=production`.
-- A cross-tenant access test that asserts a valid token for tenant A receives 404, not 403, for a case
-  belonging to tenant B.
-
-**Exit criteria:**
-
-- The cross-tenant test fails if the tenant is read from a header, a body field or a query parameter.
-- `AUTH_MODE=oidc` works against a real JWKS endpoint.
-
-**Decisions applied:** D-1, D-12.
+**Exit criteria:** review scenarios 1 and 2 return the expected rows; two concurrent sweepers produce
+one set of events; the report plan uses the partial index (`EXPLAIN`).
 
 ---
 
-## Phase 5: Stuck-queue report and sweeper
+## Phase 5: Performance evidence and SLOs
 
-**Goal:** find the money before the deadline finds it.
+- `scripts/seed-perf.ts`: 1M cases, realistic distribution, generated in SQL; one case with 400
+  events. A `--rows` flag exists for anyone who wants 10M.
+- `docs/PERFORMANCE.md`: `EXPLAIN (ANALYZE, BUFFERS)` for the report and history, and the scaling
+  argument (TRADEOFFS §10).
+- `docs/SLOS.md`: what pages someone at 3am (a breached deadline that was not at risk the day before,
+  sweeper lag, a failed event write).
 
-**Deliverables:**
-
-- `GET /v1/reports/stuck-queue` with `risk_window_days`, defaulting to 7, filtered on
-  `deadline_at <= now() + interval` and `status IN ('OPEN','UNDER_REVIEW')`, ordered by exposure.
-- `src/worker/sweeper.ts`: periodic batch, `FOR UPDATE SKIP LOCKED`, idempotent, `system` actor
-  (D-9), interval from `SWEEP_INTERVAL_MS`, default 60 s (D-22).
-- The report orders by `amount_base_minor` using the fixed versioned FX normalisation (D-5), which is
-  a deliberate deviation from the brief's `amount_cents DESC`: sorting raw minor units across
-  currencies ranks a KWD case below a JPY case, which inverts the meaning of "exposure".
-
-**Exit criteria:**
-
-- The sweeper is idempotent: two concurrent workers produce one set of events.
-- Review scenarios 1 and 2 return the expected rows.
-- The report is covered by an index whose usage is shown by `EXPLAIN`, not assumed.
-
-**Decisions applied:** D-2, D-5, D-9, D-22.
+**Exit criteria:** scenario 3 under 200 ms and scenario 4 under 100 ms, measured; D-13 (no
+partitioning) confirmed or reversed with numbers.
 
 ---
 
-## Phase 6: Performance evidence, SLOs, optional console
+## Not in scope
 
-**Goal:** produce the measurements the brief says the review will debate, and decide D-13 on evidence.
-
-**Deliverables:**
-
-- `scripts/bench.ts`: fixture generator for `smoke` 200k, `full` 2M default, `spec` 10M behind a flag
-  (D-2).
-- `docs/PERFORMANCE.md`: `EXPLAIN (ANALYZE, BUFFERS)` for the report and the history endpoint at 2M
-  and 10M rows, plus vacuum and bloat figures.
-- A written decision on partitioning, using that evidence. The current answer is no (D-13).
-- `docs/SLOS.md`: what pages a human at 3am, with thresholds and the alert that fires.
-- Optional one-page console: at-risk table and case history timeline. Plain component kit, no custom
-  CSS, per the brief's instruction to favour function over polish.
-
-**Exit criteria:**
-
-- Scenario 3: history for a 400-event case under 200 ms, measured.
-- Scenario 4: report under 100 ms for a 10M-row tenant, measured, with the plan attached.
-- D-13 is either confirmed or reversed with numbers.
-
-**Decisions applied:** D-2, D-13, and the evidence obligations of D-5 and D-22.
-
----
-
-## Dependencies between phases
-
-```
-0 foundation
-  └─ 1 schema ──┬─ 2 domain ──┬─ 3 case api ──┬─ 4 auth
-                │             │                │
-                └─────────────┴─ 5 report + sweeper
-                                       └─ 6 evidence + console
-```
-
-Phase 2 is independent of phase 1 and could be built in parallel; keeping it sequential avoids
-inventing an interface the schema then contradicts.
-
-## What is deliberately not in scope
-
-- **Frontend beyond the optional console.** The brief marks it optional and says to prefer function.
-- **A rules admin API.** It is the natural injection and privilege-escalation surface that D-8 avoids
-  by keeping predicates in code.
-- **Notifications to scheme APIs.** Nothing in the brief asks for outbound integration, and it would
-  put credentials on the critical path.
-- **Partitioning**, until phase 6 says otherwise.
+A UI console, OIDC/JWKS, a rules admin API, outbound scheme integrations, evidence file storage,
+voiding cases, retroactive deadline revisions, partitioning (until phase 5 says otherwise).

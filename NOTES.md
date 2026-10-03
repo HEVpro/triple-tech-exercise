@@ -21,8 +21,10 @@ decision was the same:
 4. Every decision was recorded here with the reason, so a reviewer can disagree with the reasoning
    rather than having to reverse-engineer it.
 
-The most valuable output of the AI was **not code**. It was the discovery of two defects in the
-brief itself (D-4 and D-13) and of the npm/TypeScript incompatibility (D-15).
+The most valuable output of the AI was **not code**. It was the discovery of defects in the brief
+itself (D-4, and rule 1 in 2.10) and of the npm/TypeScript incompatibility (D-15). The most valuable
+output of the human was the repeated question "what is the use case?", which removed a good deal of
+the AI's over-engineering (2.13).
 
 ---
 
@@ -137,6 +139,9 @@ must be tested by trying to get through it. Both cases are now verified: a stage
 staged `console.log` exits 1, a clean tree exits 0. The credential scan was also promoted into CI so
 that it does not depend on a local hook being installed at all.
 
+*Later:* the homemade regex scanner was replaced by gitleaks in CI over the full history, and the
+`console` grep by ESLint's `noInlineConfig` (D-17, D-32). The lesson about testing gates stands.
+
 ### 2.7 Coverage thresholds that were failing before they were meaningful
 
 `test:coverage` failed on the first honest run, at 73% lines against an 85% threshold. The tempting
@@ -164,6 +169,8 @@ while never actually doing it. Nothing in the type system or the tests would hav
 the domain module and asserted in tests, because it is the kind of correctness that only shows up
 when someone re-derives the reasoning.
 
+*Superseded by 2.11:* the clock fix was necessary but not sufficient.
+
 ### 2.9 Where the AI was right and the initial human framing was wrong
 
 Recorded because a fair account of the transcript matters more than a flattering one.
@@ -177,63 +184,132 @@ Recorded because a fair account of the transcript matters more than a flattering
   closed interval makes a boundary event simultaneously in-window and out-of-window depending on
   which code path evaluates it.
 
+### 2.10 Rule 1, as designed, would have auto-lost cases that answered in time
+
+**What came back:** the terminal rules transcribed in brief order, with rule 1 ("deadline passed →
+LOST") placed first "so that a loss is never erased", and a sweeper selecting `OPEN` *and*
+`UNDER_REVIEW` cases past their deadline.
+
+**How it was caught:** a design review that walked the normal path rather than the edge cases. A bank
+files evidence on day 20; the scheme decides on day 70. On day 46 the sweeper would have marked the
+case `LOST`, and when the scheme's `WON` arrived, rule 1 would still have beaten rule 3. A second
+defect sat next to it: with first-match evaluation, rule 2 ("evidence filed") always matches before
+rule 3, so `WON` was unreachable.
+
+**Correction:** rule 1 is "deadline passed **without evidence filed before it**", rule 2 also requires
+"no outcome yet", `WON`/`LOST` are absorbing, and the sweeper only looks at `OPEN`. Listed as a
+deviation from the brief's literal wording in TRADEOFFS §14.
+
+### 2.11 The fix for 2.8 was itself incomplete
+
+Moving the replay clock to `as_of` fixed the deadline, but the replay still **re-evaluated the rules**
+on every read. Rules are configurable per tenant and live in code, so reordering a tenant's rules or
+fixing a predicate would have changed what the system says about the past.
+
+**Correction:** D-11 revised. Rules run on write only; each event stores `to_status`, `rule_key` and
+`ruleset_version`; history folds stored values. The lesson recorded: a fix that survives one
+"why?" may not survive the second one.
+
+### 2.12 The API design broke the brief's own contract
+
+**What came back:** `GET /v1/cases/:external_ref`, and `amount_cents` renamed to `amount_minor` in
+the API.
+
+**How it was caught:** re-reading one sentence of the brief: *"Banks consume `GET /cases/:id`, so keep
+it working."* Both the path and the field rename are breaking changes for an integrated bank, which
+is exactly what the brief says it values.
+
+**Correction:** D-27. Unversioned `/cases/:id`; the database column is `amount_minor`, the API accepts
+and returns `amount_cents` as well.
+
+### 2.13 Over-engineering, caught by asking "what is the use case?"
+
+The AI proposed, at different points: effective-dated response windows with an `EXCLUDE` constraint
+and `btree_gist`; a batched backfill of an invented legacy database; three fixture profiles with 10M
+rows as a target; seven delivery phases; OIDC against a real JWKS; two SQL linters; three homemade
+repository guards.
+
+Each one was defensible in isolation. Each one fell when the human asked what concrete case it served
+in *this* exercise. The replacements are smaller and say what they give up: a two-column unique key
+(D-3), live-safe greenfield migrations plus a written plan (D-34), one 1M fixture plus a written
+scaling argument (D-2), six phases (D-35), dev tokens, sqlfluff only, gitleaks (D-32).
+
+### 2.14 A documented guarantee that was not true
+
+The README and D-24 stated that "Prettier is the single formatter for SQL". It never was:
+`.prettierignore` excluded `*.sql` and no SQL plugin was installed, so the SQL override in
+`.prettierrc.json` was dead configuration. Caught while reviewing whether `scripts/` was needed at
+all. sqlfluff now owns SQL layout explicitly.
+
+### 2.15 Whose time zone is the deadline in?
+
+The first design anchored deadlines to the tenant's time zone. The human asked what happens with
+payments made all over the world. The answer reframed the question: the cardholder's and merchant's
+locations are irrelevant; the obligation is between the issuer and the scheme, so the scheme's
+calendar anchors it. D-6 revised to a per-window zone, `UTC` by default. The AI also stated plainly
+that it had **not verified** each scheme's rulebook, so UTC is recorded as an assumption to confirm,
+not as a fact.
+
 ---
 
 ## 3. Decision register
 
-Each decision states the choice, the reason, and what was rejected.
+Each decision states the choice, the reason, and what was rejected. **(rev.)** marks a decision
+revised during the design review recorded in 2.10 to 2.15; the earlier version is described in the
+rejected column.
 
 | ID | Decision | Why | Rejected alternative |
 | --- | --- | --- | --- |
-| **D-1** | Single tenant as an explicit **working hypothesis**. `tenant_id` remains on every business table; `tenants` holds one seeded row; tenant is derived from the verified token claim exactly as it would be for 60 tenants. | Costs nothing in code, preserves the whole multi-tenant deliverable (the brief asks for a migration plan against "live data for 60+ tenants"), and can be turned on by seeding more rows. | Building full multi-tenant admin/isolation machinery for a hypothesis the exercise did not state. |
-| **D-2** | Fixture profiles: `smoke` 200k for CI, **`full` 2M as the default**, `spec` 10M behind a flag. | 2M rows with a partial index already demonstrates the review scenario, and 10M (~6-7 GB) should not be the default on a developer laptop. | Generating 10M rows by default; and equally, proving the index on 200k rows and calling it done. |
-| **D-3** | `response_windows` is effective-dated. The resolved window is **snapshotted onto the case** (`deadline_at`, `deadline_window_version`, `deadline_basis`). A retroactive regulator ruling is implemented as a versioned batch that appends `DEADLINE_REVISED` events. | Payment schemes judge a dispute under the rules in force at presentment, so the snapshot is the defensible default. Making the alternative a scripted, audited operation rather than a silent mutation means the default can be reversed safely. | Recomputing deadlines on every read from the current window: cheap, and it rewrites history, so `as_of` stops being reproducible. |
-| **D-4** | `amount_minor BIGINT` + `currency CHAR(3)`, with an ISO 4217 exponent map in code. **Field renamed from `amount_cents`.** | `amount_cents` is a defect in the brief: JPY has 0 decimals, KWD has 3. `INT` would overflow at ~$21M, which a portfolio total can reach; `BIGINT` cannot overflow in this domain. | `double precision` (inexact), `NUMERIC` (exact but slower and unnecessary for integer minor units), and a fixed 2-decimal convention (breaks JPY and KWD). |
-| **D-5** | Report normalisation materialises `amount_base_minor`, `base_currency`, `fx_rate`, `fx_rate_date` at case creation from a fixed, versioned, effective-dated FX table. | `ORDER BY amount` must mean something across currencies, and a report whose number changes daily cannot be audited or reproduced. Fixed contractual rates also match how banks provision chargeback exposure. | Live FX lookup at report time (non-reproducible, adds network latency to a sub-100ms query); grouping by currency only (does not answer "where are we losing money"). |
-| **D-6** | `deadline_at` = end of `(presentment_date + window_days)` **in the tenant's IANA timezone**, computed with `DATE` arithmetic and then localised. In-window test is the half-open interval `event_at < deadline_at`. | The scheme deadline is anchored to the bank's calendar day, not to Greenwich. `DATE` arithmetic plus `AT TIME ZONE` is DST-safe, where `TIMESTAMPTZ + interval '45 days'` silently shifts on a 23h or 25h day. A half-open interval removes boundary ambiguity entirely. | UTC-only arithmetic (grants up to 14 extra hours); storing only a `DATE` (loses hour/minute precision the operations team needs). |
-| **D-7** | `actor_type IN ('human','agent','system')`, and `actor_id` is always populated. | The sweeper is not a human and not an agent. An audit trail without an identity is decoration. | The brief's two-value enum, which cannot express the automated transition that rule 1 requires. |
-| **D-8** | Terminal rule **predicates are TypeScript functions**; `tenant_rule_config` holds only enablement and priority per tenant. No admin API in v1; config changes go through migrations. | The dangerous part of a rules engine is text that gets evaluated, which implies an admin surface that can be injected into or used for privilege escalation. The genuinely useful part is ordering and per-tenant override, which is plain data. | Fully table-driven predicates in a DSL or SQL (unauditable, untestable, an attack surface), and fully config-in-code (cannot be tuned without a deploy). |
-| **D-9** | Periodic batch sweeper, `SWEEP_INTERVAL_MS` default 60000, `FOR UPDATE SKIP LOCKED`, idempotent, `system` actor. The stuck-queue report exposes a computed `overdue` flag. | Rule 1 is time-triggered, and a case sitting in `OPEN` generates no event when the clock passes its deadline. Without an actor the stored status becomes a lie and the at-risk backlog only grows. Idempotency comes free because the events are the truth and the status is a projection. | Lazy evaluation on read (re-computes on every read, and the stored status still lies to every other consumer); `pg_cron` (domain logic in SQL, not unit-testable). |
-| **D-10** | `case_events.metadata JSONB NOT NULL DEFAULT '{}'`, validated per `event_type` by a `z.discriminatedUnion`, capped at 16 KB, no PII, `ON DELETE CASCADE` from `cases`. | Adding attributes to an event must not require a migration across 60 tenants. Typed columns are kept for everything that is queried, so JSONB is payload only. The closed union turns "append-only" from a convention into a type. | Free-form unvalidated JSONB (silently accepts typos, makes the audit trail undemonstrable); indexing into JSONB at 10M rows (unusable); storing PII (append-only vs. erasure becomes unresolvable). |
-| **D-11** | `as_of` replays events with `occurred_at <= as_of` ordered by `(occurred_at, seq)`, evaluating the rules with **`clock = as_of`**, capped at 50 000 events with an explicit `truncated` flag. Returns the reconstructed case, the status, and the rule that produced it. | Moving the clock is what makes the endpoint actually reconstruct; using `now()` would return today's status for every historical instant. `seq` makes timestamp ties deterministic. Returning the whole case means a future `CASE_AMENDED` event needs no API change. | Evaluating the deadline rule against `now()`; returning only the status (no explainability, no forward compatibility). |
-| **D-12** | JWT verified locally with `jose` against a JWKS. Tenant identity is taken **only** from the verified claim. `AUTH_MODE=dev` mints HS256 tokens locally and that endpoint refuses to run when `NODE_ENV=production`. | A tenant taken from a header or body is a cross-tenant data leak waiting to happen. The claim is the security property that makes D-1 safe to reverse. | Dev headers for tenant identity (they look harmless and they are not); a full IdP integration for the exercise (adds setup cost without testing the domain). |
-| **D-13** | **No partitioning.** The decision is deferred to evidence: `EXPLAIN (ANALYZE, BUFFERS)` plus vacuum/bloat analysis on the 2M-row fixture. Triggers to revisit are recorded. | No hot query is helped: all are tenant-scoped and index-backed. Partitioning does not assist point lookups or per-tenant scans; it only helps time-based deletion and very large global aggregates. It is a premature optimisation and costs 60x the DDL objects. | Partitioning by `presentment_date` up front, which is the reflexive choice for a large table. |
-| **D-14** | The migration runner must support **per-migration transaction control**. | `CREATE INDEX CONCURRENTLY` cannot run inside a transaction. Without this, production indexes must be created by hand outside the migration system, losing traceability on exactly the artefact the brief asks to be auditable. | A runner that wraps every migration in a transaction, which would make the required production index strategy impossible. |
-| **D-15** | `typescript@5.9.3`, pinned exactly. Not 7.x. | `typescript-eslint@8.71.0` declares `typescript: ">=4.8.4 <6.1.0"`. TypeScript 7 is incompatible with the only type-aware linter in the stack. | `typescript@latest` (7.0.2), which was the first recommendation and would have silently downgraded the lint strategy. |
-| **D-16** | ESLint 10 flat config with `typescript-eslint` **strictTypeChecked**, plus `no-restricted-imports` enforcing layer boundaries, plus `eslint-plugin-perfectionist` for deterministic ordering. | Type-aware rules catch real defects (`no-floating-promises`, `no-unnecessary-condition`), not style. The layer rules make `src/domain` physically unable to import `pg`, which is what keeps the domain testable without infrastructure. Deterministic ordering keeps diffs reviewable, and reviewable history is an explicit deliverable. | ESLint without type information; a framework that enforces layering by convention only. |
-| **D-17** | `console` is banned by two ESLint rules (`no-console`, `no-restricted-globals`) **and** independently by `npm run guard:console`, which greps `src/`. `src/` logs through `pino`; scripts write to `process.stdout`. The guard runs in `pre-push` and CI, so it does not depend on a hook being installed. | Required explicitly, and cheap to enforce reliably when it is duplicated. The grep also survives an inline `eslint-disable`, which the rule cannot. | Relying on reviewers to notice `console.log`. |
-| **D-18** | `pino` with redacted `authorization` and `cookie` headers, `pino-pretty` only in development, request id propagated per request. | Structured logs with secrets redacted, and human-readable local logs without shipping a dev transport to production. | `console.log`, per D-17. |
-| **D-19** | `pre-commit` runs only on staged files (prettier, eslint --fix, credential scan) and is `set -e` with a single command. `pre-push` and CI run the real gates: guard, typecheck, lint, test, coverage, build. | A fast commit keeps the hook usable; a slow, strict gate belongs where nobody can skip it. The `set -e` is not cosmetic: see 2.6, where a two-command hook silently disabled the whole commit gate. | Putting `tsc --noEmit` on every commit, which is slow enough that people bypass hooks. |
-| **D-20** | `commitlint` with conventional commits. | The brief asks for the history to be left intact, which makes commit messages part of the deliverable. | Unvalidated messages, which make `git log` unreadable as evidence. |
-| **D-21** | `postgres:17-alpine`, container name `triple-postgres`, port 5433, healthcheck, named volume, and a matching service container in CI. | PostgreSQL 17 is the current LTS-adjacent choice a bank would run. Port 5433 avoids colliding with a Postgres the reviewer may already have locally. The CI service container means the integration tests actually run rather than silently skipping. | The locally cached 16-alpine image (older, and pinning the project to whatever happens to be cached is not a reason). |
-| **D-22** | `SWEEP_INTERVAL_MS` defaults to 60000 and is configurable. | The latency between a real deadline and a recorded status must be bounded, measurable and alertable, which is exactly the SLO in the brief's bonus section. | A hardcoded interval, or running the sweeper on every request. |
-| **D-23** | SQL is linted twice: `npm run lint:sql` runs **sqlfluff inside Docker**, and `npm run lint:sql:node` runs a pure-Node syntax and formatting check. Neither is in the mandatory gate path. **Python is never required.** | Migrations and the report query are the two artefacts a reviewer reads by eye, so consistent formatting and semantic rules are worth having. Docker is already a prerequisite for Postgres, so adding a container changes nothing about the setup burden, and the Node fallback means the gate never needs Python. | `sqlfluff` via `pipx` or a Python venv, which makes a fresh clone fail on a machine without Python. That is unacceptable for a technical exercise. |
-| **D-24** | Prettier is the single formatter for SQL; sqlfluff's layout rule family (`LT01`-`LT14`) is excluded so the two tools cannot fight. | Two formatters disagreeing about indentation produces a repository where `npm run format` and `npm run lint:sql` contradict each other, which trains reviewers to ignore both. | Letting both enforce layout. |
+| **D-1** | Single tenant as an explicit **working hypothesis**. `tenant_id` on every business table; tenant taken only from the verified token. | Costs nothing, keeps the 60+ tenant target shape, enabled by seeding rows. | Tenant administration machinery for a hypothesis the brief does not state. |
+| **D-2** (rev.) | One performance fixture of **1M cases** with a realistic distribution, generated in SQL; a `--rows` flag for 10M. The scaling argument is written down (TRADEOFFS §10). | Report latency depends on the at-risk set size and on the index fitting in memory, not on total rows; a B-tree is 3–4 levels deep at both 1M and 10M. | Three profiles (200k / 2M / 10M) with 10M as the target, which costs a laptop 6–7 GB to prove something the argument already explains. |
+| **D-3** (rev.) | `response_windows(scheme, reason_code NULL, window_days, deadline_tz)`, `UNIQUE NULLS NOT DISTINCT (scheme, reason_code)`, changed by migration. The window is **snapshotted onto the case**. | Satisfies `window(scheme, reason_code)` and "windows are data". The snapshot means a reissued window never moves a live deadline. | Effective-dated rows with `EXCLUDE` over date ranges and `btree_gist`: served only late registration across a rule change. `DEADLINE_REVISED` batches are reserved, not built. |
+| **D-4** (rev.) | `amount_minor BIGINT` + `currency CHAR(3)` in the database, ISO 4217 exponent map in code. **The API still accepts and returns `amount_cents`**, plus `amount_minor` and `currency_exponent`. | `amount_cents` is wrong for JPY and KWD, but it is the brief's field and banks consume it. Fixing the model must not break the contract. | Renaming the API field (breaking, 2.12); `double precision`; `NUMERIC`; a fixed two-decimal convention. |
+| **D-5** (rev.) | Static `fx_rates(currency, base_currency, rate, rate_date)`; `amount_base_minor`, `fx_rate`, `fx_rate_date` snapshotted at creation. | The report must order by money across currencies, reproducibly. | Live FX at report time. Production would source rates from scheme settlement or the bank's provisioning rates (TRADEOFFS §15). |
+| **D-6** (rev.) | `deadline_at` = end of day `presentment_date + window_days` in the **window's** zone (`deadline_tz`, default `UTC`). Half-open `instant < deadline_at`. | The obligation is issuer ↔ scheme, so the scheme's calendar anchors it; UTC removes DST; half-open gives a boundary one answer. UTC is an unverified assumption per scheme. | The tenant's time zone (2.15); `timestamptz + interval`; a closed interval. |
+| **D-7** | `actor_type IN ('human','agent','system')`, `actor_id` always set; from the token (user → `human`, machine client → `agent`); `system` only for `DEADLINE_EXPIRED`, enforced by a `CHECK`. | An automatic loss needs an honest actor; the API must not let a client claim to be the system. | The brief's two-value enum. |
+| **D-8** | Rule **predicates in TypeScript**; `tenant_rule_config` holds `enabled` and `priority`. No admin API; changes by migration. | Evaluated text in a table is an attack surface and untestable; order and enablement are data. With corrected predicates, order only decides rule 1 vs rule 3. | Predicates as SQL or a DSL; everything hardcoded. |
+| **D-9** (rev.) | Periodic sweeper over **`OPEN` only**, `FOR UPDATE SKIP LOCKED`, batch, idempotent, `system` actor. | `UNDER_REVIEW` filed evidence in time and cannot lose to the deadline (2.10). | Sweeping `UNDER_REVIEW` too; lazy evaluation on read; `pg_cron`. |
+| **D-10** (rev.) | `case_events` append-only by **grants** (`triple_app`: `SELECT`, `INSERT`), a **trigger** rejecting `UPDATE`/`DELETE`/`TRUNCATE` for every role, and **`ON DELETE RESTRICT`** to `cases`. `metadata JSONB` validated per type, ≤ 16 KB, no personal data. A future "delete" is a `CASE_VOIDED` event. | Audit that a single SQL statement can erase is not audit. | `ON DELETE CASCADE` (deleting a case erased its trail); convention only. |
+| **D-11** (rev.) | **Rules run on write only.** Events store `to_status`, `rule_key`, `ruleset_version`. History folds events with `recorded_at <= as_of` by `seq`, never evaluating a rule. 50 000-event cap with `truncated`. | The past must not depend on today's code or config (2.11). | Re-evaluating rules on read with `clock = as_of`; with `now()` (2.8). |
+| **D-12** (rev.) | v1 auth: locally minted HS256 tokens, refused in production; tenant and actor from claims only. | Tests tenant isolation without IdP setup. | OIDC/JWKS in v1 (deferred, TRADEOFFS §15); identity from headers. |
+| **D-13** | **No partitioning.** Revisit on phase 5 evidence. | No hot query benefits; all are tenant-scoped and index-backed. | Partitioning up front. |
+| **D-14** | The migration runner supports **per-migration transaction control** (`-- migrate:no-transaction`, one statement per file). | `CREATE INDEX CONCURRENTLY` cannot run in a transaction and must stay in the migration system. | Wrapping every migration in a transaction. |
+| **D-15** | `typescript@5.9.3`, pinned exactly. | `typescript-eslint@8.71.0` requires `<6.1.0`. | `typescript@latest` (7.0.2). |
+| **D-16** | ESLint 10 flat config, `strictTypeChecked`, layer boundaries via `no-restricted-imports`, `perfectionist` ordering. | Type-aware rules catch defects; the domain cannot import infrastructure. | ESLint without types; layering by convention. |
+| **D-17** (rev.) | `console` banned by ESLint (`no-console`, `no-restricted-globals`) with **`linterOptions.noInlineConfig: true`**, so no source file can switch a rule off. | Same guarantee as the old grep guard, enforced in one place. | A separate grep script duplicating ESLint. |
+| **D-18** | `pino` with redacted credentials, `pino-pretty` only in development. | Structured, safe logs. | `console.log`. |
+| **D-19** (rev.) | `pre-commit`: lint-staged (ESLint and Prettier on staged files). `pre-push` and CI: typecheck, lint, tests, build. Both `set -e`. | Fast commits, strict gates where they cannot be skipped. | `tsc` on every commit. |
+| **D-20** | Conventional commits via commitlint. | The history is a deliverable. | Unvalidated messages. |
+| **D-21** | `postgres:17-alpine`, port 5433, healthcheck, data checksums, CI service container. | Current version; no clash with a local PostgreSQL; integration tests really run in CI. | A cached 16-alpine image. |
+| **D-22** | `SWEEP_INTERVAL_MS`, default 60 000, configurable. | Sweep lag is an SLO. | A hardcoded interval. |
+| **D-23** (rev.) | **sqlfluff 4.4.0 in Docker is the only SQL linter**, layout rules included; `RF04` excluded for `name`/`version`. | One tool, no Python, pinned. | A second pure-Node SQL checker. |
+| **D-24** (rev.) | Prettier does not touch SQL. | It never did (2.14); saying so is the fix. | Claiming Prettier formats SQL. |
+| **D-25** | `POST /cases/:id/transitions { to }` maps `to` to a domain fact; the rules decide; a mismatch is `409` naming the rule; same status is a no-op `200`. | Keeps the brief's vocabulary while `UNDER_REVIEW` keeps its meaning: evidence filed in time. | Clients setting any allowed status. |
+| **D-26** | `seq` = new `cases.version`, taken in the projection `UPDATE`; primary key `(case_id, seq)`. | Concurrency-safe via the row lock, gapless (a gap reveals tampering), and it is the history index. | `MAX(seq)+1`, a global identity, timestamps. |
+| **D-27** | Unversioned paths (`/cases/:id`), additive-only responses, lookup by `?external_ref=`. | "Banks consume `GET /cases/:id`, so keep it working" (2.12). | `/v1/cases/:external_ref`. |
+| **D-28** | Rules evaluated **at creation** too; the report returns `at_risk`, `responded` and recently `breached` rows with `deadline_state`. | Scenario 2 becomes deterministic, and lost money stays visible. | Waiting for the sweeper; hiding breaches from the report. |
+| **D-29** | Creation idempotent on `UNIQUE (tenant_id, external_ref)`: same payload → `200` with the case, different → `409`. | The natural key already prevents duplicates; no key table needed. | An `Idempotency-Key` store. |
+| **D-30** | Event catalogue v1: `CASE_CREATED`, `EVIDENCE_FILED`, `SCHEME_OUTCOME_RECORDED`, `DEADLINE_EXPIRED`, `NOTE_ADDED`. `NOTE_ADDED` exists so the trail shows the work, not just the status, and makes a 400-event case realistic. | A closed set, enforced by `CHECK` and by the type union. | Free-form event types. |
+| **D-31** | `recorded_at` = database `now()`, forced by trigger; clients cannot send `occurred_at`; only `DEADLINE_EXPIRED` carries `occurred_at = deadline_at`. | One clock; no backdating. | Application timestamps; client-supplied event times. |
+| **D-32** | Secret scanning with **gitleaks v8.30.1 in Docker** over the full history, in CI and as `npm run scan:secrets`. | A maintained scanner instead of 130 lines of local regexes. | The homemade guard script. |
+| **D-33** | Runner: SHA-256 checksums, advisory lock, `lock_timeout = 5s` set by the runner, invalid-index check after no-transaction migrations, forward only. | Safe and auditable against live traffic. | `drizzle-kit` (vulnerable deps, 2.3); a `down` command that nobody tests. |
+| **D-34** | Greenfield schema with **live-safe migrations**, plus a written rollout plan for 60+ tenants (`docs/MIGRATION_PLAN.md`). No invented legacy import. | What the brief asks is that our migrations can run on live data. | Modelling and backfilling a hypothetical legacy database (2.13). |
+| **D-35** | Scope: six phases (0–5); no console, no OIDC, no rules admin API, no voiding, no retroactive revisions. | The brief values a working result over breadth. | Seven phases with a console and full auth. |
 
 ---
 
 ## 4. What is deliberately unfinished at this stage
 
-Phase 0 delivers the repository, the toolchain and the database container. Recorded here so the gaps
-are explicit rather than discovered by a reviewer:
+Phases 0 and 1 are complete. Recorded so the gaps are explicit rather than discovered by a reviewer:
 
-- **Phases 1 to 6 are specified but not implemented.** The roadmap, the deliverables per phase and the
-  exit criteria are in [`docs/PHASES.md`](./docs/PHASES.md).
-- The domain model, the state machine, the entity set, the flows and the ten invariants are written
-  out in [`docs/DOMAIN.md`](./docs/DOMAIN.md). None of it is code yet: `src/domain` and
-  `src/application` are empty directories.
-- The trade-offs behind each review scenario, with what each choice costs and what would reverse it,
-  are in [`docs/TRADEOFFS.md`](./docs/TRADEOFFS.md). Three deliberate deviations from the brief are
-  listed there in section 13 so they are decisions rather than oversights.
-- **No performance number in this repository is measured yet.** The 200 ms history and 100 ms report
-  targets are phase 6 deliverables, with `EXPLAIN (ANALYZE, BUFFERS)` output attached. Until that
-  exists they are intentions, not claims.
-- Migrations are specified (`migrations/README.md`) but the runner arrives in phase 1, together with
-  the non-transactional support required by D-14. `npm run db:migrate` is therefore wired up but not
-  yet runnable.
-- The layer boundaries in D-16 are already enforced, so the first file added to `src/domain` is checked
-  against them.
-- Authentication, the case endpoints and the sweeper are not implemented. `src/http/app.ts` currently
-  serves only `/healthz`, `/readyz`, `/metrics` and `/docs`.
-- The `guards` are pattern matchers, not a full secret scanner. They cover the common cases and are a
-  backstop for carelessness; they are not a substitute for a reviewer reading the diff.
+- **No domain code, no case API, no report, no sweeper yet.** They are phases 2 to 4 in
+  [`docs/PHASES.md`](./docs/PHASES.md). `src/domain`, `src/application` and `src/worker` are empty.
+- **The schema is real and tested**: append-only enforcement, the database clock, role privileges and
+  the runner are covered by `test/schema.integration.test.ts` against a throwaway database.
+- **No performance number is measured yet.** The 200 ms and 100 ms targets are phase 5 deliverables;
+  until then they are intentions.
+- **`deadline_tz = 'UTC'` is an assumption** to confirm against each scheme's rulebook.
+- **The FX table is a placeholder** for the exercise (TRADEOFFS §15).
+- The application still connects as the database owner locally. Phase 3 switches it to a login role
+  that is a member of `triple_app`; the privilege tests already use `SET ROLE triple_app`.
+- `TENANT_*` environment variables remain from phase 0 and will become a dev seed in phase 3.

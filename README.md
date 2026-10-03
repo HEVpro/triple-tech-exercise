@@ -14,9 +14,9 @@ You need exactly two things:
 | Requirement | Version | Why |
 | --- | --- | --- |
 | **Node.js** | 22.13 or newer | Check with `node --version`. If you use `nvm`, `nvm use` picks the pinned version from `.nvmrc`. |
-| **Docker** | any recent version | Only used to run PostgreSQL and, optionally, the SQL linter. |
+| **Docker** | any recent version | Runs PostgreSQL, and the optional SQL linter and secret scanner. |
 
-**You do not need Python.** The full SQL lint runs inside a Docker container. See
+**You do not need Python.** The SQL linter runs inside a Docker container. See
 [SQL linting](#sql-linting).
 
 Nothing else is required: no global installs, no database client, no separate package manager.
@@ -32,6 +32,7 @@ cd triple-dispute
 cp .env.example .env
 npm install
 npm run db:up
+npm run db:migrate
 npm run dev
 ```
 
@@ -61,13 +62,13 @@ ready to accept connections.
 | `npm run lint` / `npm run lint:fix` | ESLint with type-aware rules, zero warnings allowed |
 | `npm run format` / `npm run format:check` | Prettier |
 | `npm run db:up` / `db:down` / `db:reset` | Start, stop, or recreate the database from scratch |
-| `npm run db:check` | Verify connectivity and print server version, timezone and role |
-| `npm run db:migrate` | Apply pending migrations (arrives in phase 1) |
-| `npm run bench:smoke` / `bench:full` / `bench:spec` | Seed fixtures at 200k / 2M / 10M rows |
-| `npm run lint:sql` | SQL lint via sqlfluff inside Docker |
-| `npm run lint:sql:node` | SQL syntax and formatting check, pure Node, no Docker |
-| `npm run guard:secrets` | Fail if a committed file matches a credential pattern |
-| `npm run guard:console` | Fail if anything under `src/` uses `console` |
+| `npm run db:migrate` | Apply pending migrations |
+| `npm run db:migrate:status` | List applied and pending migrations |
+| `npm run lint:sql` | sqlfluff 4.4.0 inside Docker |
+| `npm run scan:secrets` | gitleaks 8.30.1 inside Docker, over the full git history |
+
+`scripts/` holds only command-line entry points: `migrate.ts` today, the performance fixture
+generator in phase 5.
 
 ---
 
@@ -77,15 +78,24 @@ The full contract is generated from the code and served at `/docs`, with the raw
 `/docs/openapi.json`. One schema per endpoint drives request validation, the response type and the
 OpenAPI definition, so the contract cannot drift from the implementation.
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/healthz` | Liveness. Does not touch the database. |
-| `GET` | `/readyz` | Readiness, including a real database round trip. |
-| `GET` | `/metrics` | Prometheus metrics. |
-| `GET` | `/docs` | Interactive API reference. |
-| `GET` | `/docs/openapi.json` | Raw OpenAPI 3.1 document. |
+| Method | Path | Purpose | Phase |
+| --- | --- | --- | --- |
+| `GET` | `/healthz` | Liveness. Does not touch the database. | done |
+| `GET` | `/readyz` | Readiness, including a real database round trip. | done |
+| `GET` | `/metrics` | Prometheus metrics. | done |
+| `GET` | `/docs` | Interactive API reference. | done |
+| `GET` | `/docs/openapi.json` | Raw OpenAPI 3.1 document. | done |
+| `POST` | `/cases` | Create a case, idempotent on `external_ref` | 3 |
+| `GET` | `/cases/:id` | Current state | 3 |
+| `GET` | `/cases?external_ref=` | Look up by the bank's own id | 3 |
+| `POST` | `/cases/:id/transitions` | `{ to, reason }`, decided by the terminal rules | 3 |
+| `POST` | `/cases/:id/notes` | Record work done on a case | 3 |
+| `GET` | `/cases/:id/history?as_of=` | The case as recorded at an instant, with its events | 3 |
+| `GET` | `/reports/stuck-queue` | At-risk and breached cases, ordered by money | 4 |
 
-Case and report endpoints are added in later phases.
+Paths are unversioned because banks already consume `GET /cases/:id`; changes are additive only.
+The API accepts and returns `amount_cents`, the brief's field, alongside `amount_minor`. The full
+contract is in [`docs/DOMAIN.md`](./docs/DOMAIN.md#http-contract).
 
 ### Examples
 
@@ -120,8 +130,8 @@ to review.
 
 The full register, with rejected alternatives, is in [`NOTES.md`](./NOTES.md).
 
-**[`docs/PHASES.md`](./docs/PHASES.md)** — the seven delivery phases, what each one delivers and its
-exit criteria. Phase 0 is complete.
+**[`docs/PHASES.md`](./docs/PHASES.md)** — the delivery phases, what each one delivers and its exit
+criteria. Phases 0 and 1 are complete.
 
 **[`docs/DOMAIN.md`](./docs/DOMAIN.md)** — states, terminal rules, entities, flows, invariants and use
 cases, written to be read without reading the code.
@@ -130,18 +140,24 @@ cases, written to be read without reading the code.
 what the choice costs and what evidence would reverse it. This is the document to read before the
 45-minute trade-off discussion.
 
+**[`docs/MIGRATION_PLAN.md`](./docs/MIGRATION_PLAN.md)** — how migrations run against live data for
+60+ tenants. Summarised [below](#migration-plan-against-live-data).
+
+**[`AGENTS.md`](./AGENTS.md)** — the rules a coding agent must follow in this repository.
+
 The decisions that shape the code most:
 
-- **`case_events` is an append-only log; `cases` is a read projection.** Events are the truth and can
-  reconstruct any case at any past instant. The projection exists so that `GET /cases/:id` and the
-  report stay fast. Both are written in the same transaction.
-- **`tenant_id` is on every business table and is derived only from the verified token.** The project
-  currently runs as a single tenant as an explicit hypothesis, but the schema and the auth path are
-  already multi-tenant, so enabling it is a seed change rather than a rewrite.
-- **Money is `amount_minor BIGINT` plus `currency`, not `amount_cents`.** The brief's field name is a
-  defect: JPY has no decimal places and KWD has three. The scale comes from an ISO 4217 exponent map.
-- **Deadlines are anchored to the tenant's calendar day and compared with a half-open interval.**
-  `event_at < deadline_at`, so a boundary event is never simultaneously in and out of window.
+- **`case_events` is the truth and is append-only in the database itself**: the application role
+  cannot update or delete, a trigger rejects it for every role, and a case with events cannot be
+  deleted. `cases` is a projection written in the same transaction.
+- **Rules decide on write; history never re-evaluates them.** Each event stores the status and the
+  rule that produced it, so changing a rule never rewrites the past.
+- **One clock.** `recorded_at` is PostgreSQL's `now()`, set by a trigger; clients cannot backdate.
+- **Deadlines follow the scheme's calendar**, UTC by default, snapshotted on the case, compared with a
+  half-open interval.
+- **The contract banks already use is kept**: `/cases/:id`, and `amount_cents` in the API even though
+  the column is `amount_minor`, because the brief's field name is wrong for JPY and KWD.
+- **The tenant comes only from the verified token.**
 
 ---
 
@@ -152,7 +168,7 @@ collide with a PostgreSQL you may already be running locally.
 
 ```bash
 npm run db:up        # start and wait for healthy
-npm run db:check     # connectivity, version, timezone, role
+npm run db:migrate   # apply migrations
 npm run db:down      # stop, keep the volume
 npm run db:reset     # destroy the volume and start clean
 ```
@@ -162,92 +178,72 @@ in UTC with `data-checksums` enabled.
 
 ### Migrations
 
-Migrations are hand-written plain SQL in `migrations/`, applied in filename order. See
-[`migrations/README.md`](./migrations/README.md) for the rules, which are written for zero-downtime
-changes against live data.
+Hand-written SQL in `migrations/`, applied in filename order by `npm run db:migrate`. The rules are
+in [`migrations/README.md`](./migrations/README.md).
 
-The runner supports per-migration transaction control, because `CREATE INDEX CONCURRENTLY` cannot run
-inside a transaction and production indexes must stay inside the migration system to remain auditable.
+The runner records a SHA-256 per migration and refuses to run if an applied file changed, holds an
+advisory lock so two deploys cannot migrate at once, sets `lock_timeout` so a migration never queues
+in front of live traffic, and supports per-migration transaction control, because
+`CREATE INDEX CONCURRENTLY` cannot run inside a transaction.
+
+```bash
+npm run db:migrate
+npm run db:migrate:status
+```
+
+## Migration plan against live data
+
+The full plan is [`docs/MIGRATION_PLAN.md`](./docs/MIGRATION_PLAN.md). In short:
+
+- **One shared database, `tenant_id` on every table.** Schema changes run once; data steps run tenant
+  by tenant: one or two canary tenants, then about 10%, then the rest, largest last.
+- **Every migration is safe on a live table**: `lock_timeout` on every run, indexes `CONCURRENTLY`,
+  nullable columns first, `NOT NULL` via `CHECK … NOT VALID` + `VALIDATE`, never `ALTER COLUMN TYPE`,
+  backfills in idempotent batches.
+- **Expand, migrate, contract** across releases, so rollback is always "deploy the previous version";
+  only the contract step is irreversible, and public API fields are never contracted.
+- **Verification per tenant** is SQL that returns zero rows when healthy (projection equals the event
+  log, no invalid indexes, no missing values).
+- **Planned downtime: none.**
 
 ---
 
 ## Quality gates
 
-The gate is designed so that the fast checks are fast and the strict checks cannot be skipped.
+**On every commit** (only staged files, via husky and lint-staged): `eslint --fix --max-warnings 0`
+and `prettier --write`.
 
-**On every commit** (only staged files, via husky and lint-staged):
+**On push:** `typecheck`, `lint`, `test`, `build`.
 
-```bash
-eslint --fix --max-warnings 0
-prettier --write
-npm run guard:secrets
-```
+**In CI:** `format:check`, `typecheck`, `lint`, migrations applied twice to prove idempotency,
+`test:coverage`, `build`; plus sqlfluff, gitleaks over the full history, and commitlint, each in its
+own job.
 
-**On push and in CI:**
+The test suite runs without PostgreSQL: database tests skip themselves when the server is unreachable.
+When it is reachable, each suite creates a throwaway database, migrates it, and drops it, so tests
+never touch your data.
 
-```bash
-npm run guard:console
-npm run guard:secrets
-npm run typecheck
-npm run lint
-npm run test
-npm run test:coverage
-npm run build
-```
+### Conventions the tooling enforces
 
-The test suite runs without PostgreSQL: the database-backed tests skip themselves when the server is
-unreachable, so `npm test` works on a fresh clone before `npm run db:up`. CI runs a PostgreSQL service
-container so the integration tests actually execute there.
-
-CI additionally runs the SQL lint in Docker, and validates commit messages against conventional
-commits.
-
-### Conventions the linter enforces
-
-- **No `console`.** Blocked by `no-console` and `no-restricted-globals` in ESLint, and independently by
-  `npm run guard:console`, which greps `src/` so the rule cannot be bypassed by disabling it.
-  Application code logs through `pino` in `src/logger.ts`, with `authorization` and `cookie` headers
-  redacted; scripts write to `process.stdout`.
-- **No committed credentials.** `npm run guard:secrets` fails on private key blocks, AWS, GitHub,
-  Slack, Google and Stripe tokens, hardcoded credential assignments and bearer literals. It is a
-  floor, not a substitute for review.
-- **Deterministic ordering** of imports, object keys and union members, so diffs stay reviewable.
-- **Layer boundaries** as described above.
-- **Strict TypeScript**, including `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`. These
-  are what stop an unchecked array access or an `undefined` optional from reaching production code,
-  and they catch unsafe numeric coercion at compile time rather than in a reconciliation report.
-- **Coverage thresholds** are enforced by `npm run test:coverage`. The branch threshold is set lower
-  than the others because this codebase is early and most branches today are configuration paths;
-  it is a floor to be raised as the domain logic lands, not a target.
+- **No `console`** in `src/`, via ESLint. `linterOptions.noInlineConfig` means no source file can
+  switch a rule off; exceptions live in `eslint.config.js`, where they are reviewed.
+- **No committed credentials**: gitleaks in CI.
+- **Layer boundaries**: `src/domain` cannot import infrastructure, HTTP or I/O.
+- **Strict TypeScript**, including `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.
+- **Deterministic ordering** of imports, object keys and union members.
+- **Coverage thresholds** in `test:coverage`; the branch threshold is a floor to raise as domain logic
+  lands.
 
 ---
 
 ## SQL linting
 
-There are two SQL checkers, and neither is required to run the project.
-
 ```bash
-npm run lint:sql        # sqlfluff, inside Docker. Full semantic rules.
-npm run lint:sql:node   # pure Node. Syntax validation plus formatting. No Docker needed.
+npm run lint:sql
 ```
 
-**Why both.** Migrations and the report query are the two artefacts a reviewer reads by eye, so
-formatting consistency and semantic rules are worth having. But a linter that needs Python would mean
-a fresh clone fails on a machine without it, which is not acceptable for a technical exercise.
-
-**No Python is required, ever.** `npm run lint:sql` runs
-[`ghcr.io/sqlfluff/sqlfluff`](https://hub.docker.com/r/sqlfluff/sqlfluff) in a container, and Docker is
-already required for PostgreSQL. `npm run lint:sql:node` needs nothing beyond `npm install`.
-
-**They do not fight each other.** Prettier is the single formatter for SQL, so sqlfluff's layout rule
-family (`LT01` to `LT14`) is excluded and only semantic rules run. A repository where two formatters
-disagree trains reviewers to ignore both.
-
-If you have Python and prefer it natively, that works too:
-
-```bash
-pipx run sqlfluff lint --dialect postgres migrations/
-```
+[sqlfluff](https://github.com/sqlfluff/sqlfluff) 4.4.0 in Docker, configured in `.sqlfluff`. It owns
+both layout and semantic rules for `migrations/`; Prettier does not format SQL. No Python is needed.
 
 ---
 
@@ -268,7 +264,7 @@ Copy `.env.example` to `.env`. The scripts load it automatically via Node's
 | `AUTH_MODE` | `dev` | `dev` or `oidc` |
 | `JWT_ISSUER` / `JWT_AUDIENCE` / `JWT_JWKS_URL` | — | Verified on every request |
 | `SWEEP_INTERVAL_MS` | `60000` | Deadline sweeper period |
-| `TENANT_ID` / `TENANT_NAME` / `TENANT_TIMEZONE` / `TENANT_BASE_CURRENCY` | — | Seed values for the single-tenant hypothesis |
+| `TENANT_ID` / `TENANT_NAME` / `TENANT_TIMEZONE` / `TENANT_BASE_CURRENCY` | — | Seed values for the single-tenant hypothesis; the time zone is for display only |
 
 ---
 
@@ -289,7 +285,7 @@ lsof -ti:3000 | xargs kill
 
 **`readyz` returns 503**
 
-Postgres is not reachable. `npm run db:check` reports the connection error and the likely fix.
+PostgreSQL is not reachable. Check `docker ps` for `triple-postgres` and run `npm run db:up`.
 
 **`Cannot find package 'vite'`**
 
@@ -300,14 +296,15 @@ so a clean `npm install` resolves it; if node_modules is in a strange state, rem
 
 ## Project status
 
-Phase 0 of 7 complete: repository, toolchain, gates and database container. The remaining phases, the
-domain model and the trade-offs are specified in [`docs/`](./docs) and the gaps are listed explicitly
-in [`NOTES.md`](./NOTES.md) section 4.
+Phases 0 and 1 of 0–5 are complete: toolchain and gates, the schema, the migration runner and the
+live-data plan. What is deliberately unfinished is listed in [`NOTES.md`](./NOTES.md) section 4.
 
 | Document | Contents |
 | --- | --- |
 | [`docs/PHASES.md`](./docs/PHASES.md) | Delivery phases and exit criteria |
-| [`docs/DOMAIN.md`](./docs/DOMAIN.md) | States, rules, schema, flows, invariants, use cases |
-| [`docs/TRADEOFFS.md`](./docs/TRADEOFFS.md) | Trade-offs per review scenario, with reversal triggers |
+| [`docs/DOMAIN.md`](./docs/DOMAIN.md) | States, rules, clocks, schema, API contract, invariants |
+| [`docs/TRADEOFFS.md`](./docs/TRADEOFFS.md) | Trade-offs per review scenario, deviations from the brief |
+| [`docs/MIGRATION_PLAN.md`](./docs/MIGRATION_PLAN.md) | Migrations against live data for 60+ tenants |
 | [`NOTES.md`](./NOTES.md) | How AI was used, failed prompts, decision register, open gaps |
-| [`migrations/README.md`](./migrations/README.md) | Migration conventions and the zero-downtime rules |
+| [`AGENTS.md`](./AGENTS.md) | Rules for coding agents |
+| [`migrations/README.md`](./migrations/README.md) | Migration conventions and the runner |
