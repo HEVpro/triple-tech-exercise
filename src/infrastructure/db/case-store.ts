@@ -1,8 +1,29 @@
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 
-import { and, asc, eq, isNull, lte, or, sql } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  gt,
+  gte,
+  isNull,
+  lt,
+  lte,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm'
+import { unionAll } from 'drizzle-orm/pg-core'
 
-import type { CaseStore, CaseTransaction, Scheme } from '../../application/cases/index.js'
+import type {
+  CaseStore,
+  CaseTransaction,
+  QueuePageQuery,
+  Scheme,
+} from '../../application/cases/index.js'
+import type { QueueState } from '../../domain/dispute/index.js'
 import type { RecordedEvent } from '../../domain/events/index.js'
 import type { RuleKey } from '../../domain/rules/index.js'
 import type { CaseStatus } from '../../domain/shared/index.js'
@@ -125,6 +146,68 @@ function caseTransaction(tx: Tx): CaseTransaction {
       return new Date(value)
     },
 
+    async queuePage(query) {
+      const parts = queueParts(query).map((where) =>
+        tx
+          .select({ amount_base_minor: cases.amount_base_minor, id: cases.id })
+          .from(cases)
+          .where(and(eq(cases.tenant_id, query.tenantId), where, keysetAfter(query.after))),
+      )
+      const [first, second, ...rest] = parts
+      if (!first) return []
+
+      // Late materialisation: the page is chosen from the covering indexes alone (ids and
+      // amounts), and only the rows on the page are read from the table.
+      const ordered = (second ? unionAll(first, second, ...rest) : first)
+        .orderBy(desc(cases.amount_base_minor), desc(cases.id))
+        .limit(query.limit)
+        .as('page')
+
+      const rows = await tx
+        .select(getTableColumns(cases))
+        .from(ordered)
+        .innerJoin(cases, eq(cases.id, ordered.id))
+        .orderBy(desc(ordered.amount_base_minor), desc(ordered.id))
+      return rows
+    },
+
+    async queueSummary(window) {
+      const tenant = eq(cases.tenant_id, window.tenantId)
+      const amount = cases.amount_base_minor
+      const inQueue = (filter: SQL) => ({
+        amount: sql<string>`coalesce(sum(${amount}) filter (where ${filter}), 0)`,
+        count: sql<number>`count(*) filter (where ${filter})`.mapWith(Number),
+      })
+      const atRisk = sql`${OPEN} and ${cases.deadline_at} > ${window.now}`
+      const overdue = sql`${OPEN} and ${cases.deadline_at} <= ${window.now}`
+
+      const [open] = await tx
+        .select({
+          at_risk: inQueue(atRisk),
+          overdue: inQueue(overdue),
+          responded: inQueue(UNDER_REVIEW),
+        })
+        .from(cases)
+        .where(and(tenant, OPEN_OR_UNDER_REVIEW, lte(cases.deadline_at, window.horizon)))
+      const [lost] = await tx
+        .select(inQueue(sql`true`))
+        .from(cases)
+        .where(and(tenant, LOST_BY_DEADLINE, gte(cases.deadline_at, window.lookback)))
+      if (!open || !lost) throw new Error('aggregate queries always return one row')
+
+      return {
+        at_risk: { amount_base_minor: BigInt(open.at_risk.amount), count: open.at_risk.count },
+        breached: {
+          amount_base_minor: BigInt(open.overdue.amount) + BigInt(lost.amount),
+          count: open.overdue.count + lost.count,
+        },
+        responded: {
+          amount_base_minor: BigInt(open.responded.amount),
+          count: open.responded.count,
+        },
+      }
+    },
+
     // The row for the reason code wins over the scheme default (reason_code IS NULL).
     async responseWindow(scheme: Scheme, reasonCode) {
       const [row] = await tx
@@ -179,4 +262,39 @@ function toRecordedEvent(row: typeof caseEvents.$inferSelect): RecordedEvent {
     to: row.to_status,
     type: row.event_type,
   } as RecordedEvent
+}
+
+// Status and rule constants are written as SQL literals, not bound parameters, so the planner can
+// prove they match the partial indexes' WHERE clauses (cases_queue_idx, cases_queue_breached_idx).
+const OPEN = sql`${cases.status} = 'OPEN'`
+const UNDER_REVIEW = sql`${cases.status} = 'UNDER_REVIEW'`
+const OPEN_OR_UNDER_REVIEW = sql`${cases.status} in ('OPEN', 'UNDER_REVIEW')`
+const LOST_BY_DEADLINE = sql`${cases.status} = 'LOST' and ${cases.decided_by_rule} = 'deadline_passed'`
+
+// Strictly after the last row of the previous page, in (amount_base_minor, id) descending order.
+function keysetAfter(after: QueuePageQuery['after']): SQL | undefined {
+  if (!after) return undefined
+  return or(
+    lt(cases.amount_base_minor, after.amount_base_minor),
+    and(eq(cases.amount_base_minor, after.amount_base_minor), lt(cases.id, after.id)),
+  )
+}
+
+// One WHERE clause per index-backed part of the queue. OPEN cases split at `now` into at_risk and
+// breached-but-not-yet-swept; when both are wanted they are read as one range.
+function queueParts(query: QueuePageQuery): SQL[] {
+  const wants = (state: QueueState) => query.states.has(state)
+  const parts: (SQL | undefined)[] = []
+
+  if (wants('at_risk') && wants('breached')) {
+    parts.push(and(OPEN, lte(cases.deadline_at, query.horizon)))
+  } else if (wants('at_risk')) {
+    parts.push(and(OPEN, gt(cases.deadline_at, query.now), lte(cases.deadline_at, query.horizon)))
+  } else if (wants('breached')) {
+    parts.push(and(OPEN, lte(cases.deadline_at, query.now)))
+  }
+  if (wants('responded')) parts.push(and(UNDER_REVIEW, lte(cases.deadline_at, query.horizon)))
+  if (wants('breached')) parts.push(and(LOST_BY_DEADLINE, gte(cases.deadline_at, query.lookback)))
+
+  return parts.filter((part): part is SQL => part !== undefined)
 }

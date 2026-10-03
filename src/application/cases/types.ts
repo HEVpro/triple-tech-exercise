@@ -1,3 +1,4 @@
+import type { QueueState } from '../../domain/dispute/index.js'
 import type { RuleKey } from '../../domain/rules/index.js'
 import type { Actor, CaseStatus } from '../../domain/shared/index.js'
 
@@ -37,6 +38,24 @@ export type NewCaseRecord = Omit<CaseRecord, 'created_at' | 'id' | 'updated_at'>
 // Who is calling, as established by the verified token. Never built from request input.
 export interface Principal {
   actor: Actor
+  tenantId: string
+}
+
+// One page of the stuck queue: the selected states, ordered by amount_base_minor then id, both
+// descending, starting strictly after `after` (keyset pagination).
+export interface QueuePageQuery extends QueueWindow {
+  after: { amount_base_minor: bigint; id: string } | null
+  limit: number
+  states: ReadonlySet<QueueState>
+}
+
+export type QueueSummary = Record<QueueState, { amount_base_minor: bigint; count: number }>
+
+// The instants that bound the report: at_risk up to `horizon`, breached back to `lookback`.
+export interface QueueWindow {
+  horizon: Date
+  lookback: Date
+  now: Date
   tenantId: string
 }
 

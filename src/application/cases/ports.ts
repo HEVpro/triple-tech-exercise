@@ -6,6 +6,9 @@ import type {
   CaseRecord,
   FxRateRecord,
   NewCaseRecord,
+  QueuePageQuery,
+  QueueSummary,
+  QueueWindow,
   ResponseWindowRecord,
   Scheme,
   TenantRecord,
@@ -49,6 +52,8 @@ export interface CaseTransaction {
   insertCase(values: NewCaseRecord): Promise<CaseRecord | null>
   // The transaction's clock: PostgreSQL now(), the same instant recorded_at will carry.
   now(): Promise<Date>
+  queuePage(query: QueuePageQuery): Promise<CaseRecord[]>
+  queueSummary(window: QueueWindow): Promise<QueueSummary>
   responseWindow(scheme: Scheme, reasonCode: string): Promise<null | ResponseWindowRecord>
   ruleConfig(tenantId: string): Promise<RuleConfigEntry[]>
   tenant(id: string): Promise<null | TenantRecord>
