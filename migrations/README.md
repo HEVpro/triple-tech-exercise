@@ -24,6 +24,13 @@ The rollout plan for live data is in [`../docs/MIGRATION_PLAN.md`](../docs/MIGRA
    irreversible and why, in its header comment.
 8. **Name constraints explicitly** (`<table>_<column>_check`), so a future migration can drop or
    replace them by name.
+9. **No `IF NOT EXISTS` on tables, columns or indexes.** The runner already guarantees each
+   migration runs exactly once and atomically (ledger, checksum, one transaction per file), so it
+   protects nothing. Worse, it only compares names: `CREATE TABLE IF NOT EXISTS cases` would skip a
+   `cases` table with a different shape, record the migration as applied, and let the ledger lie.
+   On a concurrent index it would keep an `INVALID` index forever. An "already exists" error is the
+   correct, loud outcome. The exceptions are objects outside the ledger's control: roles (cluster
+   wide, often provisioned by infrastructure, see `0001`) and extensions.
 
 ## What the runner does
 
