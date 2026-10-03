@@ -182,9 +182,10 @@ Hand-written SQL in `migrations/`, applied in filename order by `npm run db:migr
 in [`migrations/README.md`](./migrations/README.md).
 
 The runner records a SHA-256 per migration and refuses to run if an applied file changed, holds an
-advisory lock so two deploys cannot migrate at once, sets `lock_timeout` so a migration never queues
-in front of live traffic, and supports per-migration transaction control, because
-`CREATE INDEX CONCURRENTLY` cannot run inside a transaction.
+advisory lock so two deploys cannot migrate at once, sets `lock_timeout` so a transactional migration
+never queues in front of live traffic, supports per-migration transaction control because
+`CREATE INDEX CONCURRENTLY` cannot run inside a transaction, cleans up after a failed concurrent
+build, and refuses to touch a database that has tables but no `triple_migrations` ledger.
 
 ```bash
 npm run db:migrate
@@ -197,7 +198,7 @@ The full plan is [`docs/MIGRATION_PLAN.md`](./docs/MIGRATION_PLAN.md). In short:
 
 - **One shared database, `tenant_id` on every table.** Schema changes run once; data steps run tenant
   by tenant: one or two canary tenants, then about 10%, then the rest, largest last.
-- **Every migration is safe on a live table**: `lock_timeout` on every run, indexes `CONCURRENTLY`,
+- **Every migration is safe on a live table**: `lock_timeout` on strong locks, indexes `CONCURRENTLY`,
   nullable columns first, `NOT NULL` via `CHECK … NOT VALID` + `VALIDATE`, never `ALTER COLUMN TYPE`,
   backfills in idempotent batches.
 - **Expand, migrate, contract** across releases, so rollback is always "deploy the previous version";

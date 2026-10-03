@@ -250,6 +250,36 @@ calendar anchors it. D-6 revised to a per-window zone, `UTC` by default. The AI 
 that it had **not verified** each scheme's rulebook, so UTC is recorded as an assumption to confirm,
 not as a fact.
 
+### 2.16 "Safe against live data" that was not, until it was tested against live-like data
+
+**What was asked:** the human asked directly whether running these migrations against the current
+database could break it, suspecting some would.
+
+**What the first version did:** every migration passed on an empty database and in CI, and the docs
+called the runner live-safe. Four failures were then reproduced on throwaway databases:
+
+1. **`lock_timeout = 5s` killed `CREATE INDEX CONCURRENTLY`** while any transaction older than 5 s was
+   open, which is normal on a live database. The build was cancelled halfway, left an `INVALID`
+   index, and every retry failed with "relation already exists". A setting added for safety made
+   the safest operation fail.
+2. **The invalid-index check was global.** Any unrelated invalid index in the database failed our
+   migration *after* the index had been built successfully but before it was recorded, so the next
+   run failed again with "already exists".
+3. **The ledger was called `schema_migrations`**, the name several other tools use. A database
+   carrying golang-migrate's table made the runner crash on its first query.
+4. **A database with existing tables was half-migrated.** On a database with its own `cases` table,
+   migrations 0001–0004 were applied and committed before 0005 failed.
+
+**Correction:** D-33 revised. Concurrent builds run without lock or statement timeouts (their lock
+does not block traffic); the runner drops only the invalid index *its* migration left; the ledger is
+`triple_migrations`; and the runner refuses, before writing anything, a database with tables but no
+ledger. Each failure has a regression test in `test/migrator.integration.test.ts`, including one that
+holds a transaction open for 6 s and asserts the build waits instead of failing.
+
+**What it still does not do:** adopt an existing schema. These migrations build the schema from
+scratch (D-34); a live database with a legacy `cases` table would need a dedicated baseline
+migration, and the runner now says so instead of failing in the middle.
+
 ---
 
 ## 3. Decision register
@@ -292,7 +322,7 @@ rejected column.
 | **D-30** | Event catalogue v1: `CASE_CREATED`, `EVIDENCE_FILED`, `SCHEME_OUTCOME_RECORDED`, `DEADLINE_EXPIRED`, `NOTE_ADDED`. `NOTE_ADDED` exists so the trail shows the work, not just the status, and makes a 400-event case realistic. | A closed set, enforced by `CHECK` and by the type union. | Free-form event types. |
 | **D-31** | `recorded_at` = database `now()`, forced by trigger; clients cannot send `occurred_at`; only `DEADLINE_EXPIRED` carries `occurred_at = deadline_at`. | One clock; no backdating. | Application timestamps; client-supplied event times. |
 | **D-32** | Secret scanning with **gitleaks v8.30.1 in Docker** over the full history, in CI and as `npm run scan:secrets`. | A maintained scanner instead of 130 lines of local regexes. | The homemade guard script. |
-| **D-33** | Runner: SHA-256 checksums, advisory lock, `lock_timeout = 5s` set by the runner, invalid-index check after no-transaction migrations, forward only. | Safe and auditable against live traffic. | `drizzle-kit` (vulnerable deps, 2.3); a `down` command that nobody tests. |
+| **D-33** (rev.) | Runner: SHA-256 checksums, advisory lock, ledger named `triple_migrations`, refusal of a non-empty database without a ledger, `lock_timeout = 5s` for transactional migrations, **no timeouts for concurrent index builds** and cleanup of the `INVALID` index a failed build leaves, forward only. | Safe and auditable against live traffic (2.16). | A uniform `lock_timeout` and a global invalid-index check (2.16); `drizzle-kit` (2.3); a `down` command nobody tests. |
 | **D-34** | Greenfield schema with **live-safe migrations**, plus a written rollout plan for 60+ tenants (`docs/MIGRATION_PLAN.md`). No invented legacy import. | What the brief asks is that our migrations can run on live data. | Modelling and backfilling a hypothetical legacy database (2.13). |
 | **D-35** | Scope: six phases (0–5); no console, no OIDC, no rules admin API, no voiding, no retroactive revisions. | The brief values a working result over breadth. | Seven phases with a console and full auth. |
 
@@ -305,7 +335,8 @@ Phases 0 and 1 are complete. Recorded so the gaps are explicit rather than disco
 - **No domain code, no case API, no report, no sweeper yet.** They are phases 2 to 4 in
   [`docs/PHASES.md`](./docs/PHASES.md). `src/domain`, `src/application` and `src/worker` are empty.
 - **The schema is real and tested**: append-only enforcement, the database clock, role privileges and
-  the runner are covered by `test/schema.integration.test.ts` against a throwaway database.
+  the runner are covered by `test/schema.integration.test.ts` and `test/migrator.integration.test.ts`
+  against throwaway databases.
 - **No performance number is measured yet.** The 200 ms and 100 ms targets are phase 5 deliverables;
   until then they are intentions.
 - **`deadline_tz = 'UTC'` is an assumption** to confirm against each scheme's rulebook.

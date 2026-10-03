@@ -36,14 +36,15 @@ Three PostgreSQL facts drive every rule below.
 
 | Rule | How it is enforced |
 | --- | --- |
-| Never wait for a lock for long | The runner sets `lock_timeout = 5s` on every migration. It fails and is retried, instead of queueing. |
-| Indexes are built `CONCURRENTLY` | Files marked `-- migrate:no-transaction`, one statement each; the runner checks no invalid index is left behind. |
+| Never wait for a strong lock for long | Transactional migrations run with `lock_timeout = 5s`. They fail and are retried, instead of queueing. |
+| Indexes are built `CONCURRENTLY` | Files marked `-- migrate:no-transaction`, one statement each, with `lock_timeout` and `statement_timeout` disabled: the build waits for open transactions without blocking traffic. A failed build's `INVALID` index is dropped by the runner so the retry is clean. |
 | New columns are nullable, or have a constant default | Instant in PostgreSQL 11+. |
 | `NOT NULL` in two steps | `ADD CONSTRAINT … CHECK (col IS NOT NULL) NOT VALID`, then `VALIDATE CONSTRAINT` (no exclusive lock), then `SET NOT NULL`. |
 | Never `ALTER COLUMN TYPE` | Add a column, backfill in batches, switch reads, drop later. |
 | Backfills in batches | ~5 000 rows per transaction, keyed by primary key, idempotent (`WHERE new_col IS NULL`), resumable. |
 | Applied migrations are immutable | The runner stores a SHA-256 per file and refuses to run if one changed. Fix forward. |
 | One runner at a time | A PostgreSQL advisory lock around the whole run. |
+| Never half-migrate someone else's database | The runner refuses a database that has tables but no `triple_migrations` ledger. |
 
 ---
 
@@ -95,7 +96,8 @@ timestamps) so a failed tenant is retried on its own.
 
 ## Downtime and duration
 
-- **Planned downtime: none.** Locks are milliseconds, bounded by `lock_timeout`.
+- **Planned downtime: none.** Strong locks are milliseconds, bounded by `lock_timeout`; concurrent
+  index builds take longer but never block reads or writes.
 - **This repository's migrations** on an empty database apply in well under a second (CI applies
   them on every run, twice, to prove idempotency).
 - **A batched backfill** of a 10M-row tenant is an estimate of 10 to 20 minutes, throttled; it will be

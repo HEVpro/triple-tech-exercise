@@ -208,8 +208,9 @@ configurability the brief asks for exists, but its practical reach is small.
   time-based deletion and global aggregates, neither of which we have. Revisit on vacuum or bloat
   evidence.
 - **Per-migration transaction control** (D-14), so `CREATE INDEX CONCURRENTLY` lives inside the
-  migration system. Cost: a no-transaction migration can half-apply; the runner fails loudly on an
-  invalid index left behind.
+  migration system. Cost: a concurrent build can fail halfway and leave an `INVALID` index; the runner
+  drops the one it left so the retry is clean, and runs the build without timeouts so an open
+  transaction makes it wait rather than fail.
 - **Greenfield schema, live-safe migrations** (D-34). We do not invent a legacy database to migrate
   from. Every migration follows the rules that make it safe on a live table, and
   [`MIGRATION_PLAN.md`](./MIGRATION_PLAN.md) explains how it rolls out to 60+ tenants.

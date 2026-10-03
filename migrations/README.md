@@ -28,8 +28,12 @@ The rollout plan for live data is in [`../docs/MIGRATION_PLAN.md`](../docs/MIGRA
 ## What the runner does
 
 - Takes a PostgreSQL advisory lock, so two deploys cannot run migrations at the same time.
-- Records each migration in `schema_migrations` with its checksum, mode and duration.
-- Sets `lock_timeout = 5s` on every migration, so a migration that cannot get its lock fails instead
+- **Only starts from an empty database.** If the database has tables but no `triple_migrations`
+  ledger (another tool's schema, a legacy system), it refuses before touching anything. Adopting an
+  existing schema needs a dedicated baseline migration, written on purpose.
+- Records each migration in `triple_migrations` with its checksum, mode and duration. The name is
+  project-specific so it never adopts another tool's `schema_migrations`.
+- Transactional migrations run with `lock_timeout = 5s`: one that cannot get its lock fails instead
   of queueing in front of live traffic. Files do not need to set it.
 - Runs each migration in its own transaction, **unless** the file starts with:
 
@@ -38,8 +42,24 @@ The rollout plan for live data is in [`../docs/MIGRATION_PLAN.md`](../docs/MIGRA
   ```
 
   `CREATE INDEX CONCURRENTLY` cannot run inside a transaction (D-14). Such a file must contain exactly
-  one statement, because several statements sent together run as an implicit transaction. After it
-  runs, the runner fails if any invalid index was left behind; drop it and re-run.
+  one statement, because several statements sent together run as an implicit transaction.
+
+  These run with `lock_timeout = 0` and `statement_timeout = 0`. A concurrent build must wait for
+  every transaction already open on the table; a timeout would cancel it halfway. Its lock does not
+  block reads or writes, so waiting is safe; it is slow, not disruptive.
+
+  If the build fails anyway (duplicate data for a unique index, a cancelled session), the runner
+  drops the `INVALID` index **that this migration left**, so a retry starts clean. Invalid indexes
+  that existed before are left alone: they are not ours.
+
+## Known limits
+
+- **`0001` needs `CREATEROLE` only if `triple_app` does not exist yet.** On a managed database the
+  role is normally provisioned by infrastructure beforehand, and the migration then only grants
+  `USAGE` to it.
+- **`case_events` rejects `UPDATE` for every role, including migrations.** A future backfill of a new
+  column on that table has to disable the trigger inside its own migration, which is visible in
+  review. Prefer adding nullable columns that only new events fill.
 
 ## Lint
 

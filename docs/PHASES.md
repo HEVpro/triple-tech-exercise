@@ -38,8 +38,9 @@ secret scanning moved to gitleaks (D-32).
 - `migrations/0001` to `0010`: role, tenants, response windows, FX rates, cases, case events, rule
   config, and three indexes built `CONCURRENTLY`.
 - Migration runner (`src/infrastructure/db/migrator.ts`, CLI `scripts/migrate.ts`): ordered files,
-  SHA-256 checksums, advisory lock, `lock_timeout`, per-migration transaction control, invalid-index
-  check. `npm run db:migrate` and `db:migrate:status`.
+  SHA-256 checksums, advisory lock, `lock_timeout` for transactional migrations, per-migration
+  transaction control, cleanup of a failed concurrent build, refusal to touch a non-empty database
+  without a ledger. `npm run db:migrate` and `db:migrate:status`.
 - [`MIGRATION_PLAN.md`](./MIGRATION_PLAN.md): the live-data plan the brief asks for.
 - Tests on a throwaway database per run: runner behaviour, append-only enforcement, clocks, role
   privileges, response-window uniqueness.
