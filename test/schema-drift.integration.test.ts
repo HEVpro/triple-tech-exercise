@@ -17,8 +17,6 @@ import {
 // catalogues must match, except for the objects drizzle-kit cannot express, which live in custom
 // migrations only.
 const MANAGED_BY_CUSTOM_MIGRATIONS = new Set([
-  'cases_at_risk_idx',
-  'cases_breached_idx',
   'cases_queue_breached_idx',
   'cases_queue_idx',
   'cases_sweep_idx',

@@ -36,6 +36,20 @@
       "when": 1790997067693,
       "tag": "20261003031107_cases_queue_breached_index",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791139462769,
+      "tag": "20261004184422_drop_cases_at_risk_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791139464185,
+      "tag": "20261004184424_drop_cases_breached_index",
+      "breakpoints": true
     }
   ]
 }

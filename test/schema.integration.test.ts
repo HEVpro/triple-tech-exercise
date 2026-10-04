@@ -103,8 +103,6 @@ describe.skipIf(!available)('migration runner against a real database', () => {
        WHERE tablename = 'cases' AND indexname LIKE 'cases\\_%\\_idx' ORDER BY indexname`,
     )
     expect(result.rows.map((row) => row.indexname)).toEqual([
-      'cases_at_risk_idx',
-      'cases_breached_idx',
       'cases_queue_breached_idx',
       'cases_queue_idx',
       'cases_sweep_idx',
