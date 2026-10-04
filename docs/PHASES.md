@@ -147,15 +147,24 @@ tested at the domain level.
 
 ## Phase 5: Performance evidence and SLOs
 
-- **Contract step for the report indexes**: confirm the summary moves to the new indexes, then drop
-  `cases_at_risk_idx` and `cases_breached_idx` with `DROP INDEX CONCURRENTLY`.
-- Complete `docs/PERFORMANCE.md` (started in phase 4 with the 1M measurements): systematic cold and
-  warm runs, the summary's plan after the contract step, optionally the 10M run.
+**Done**
+
+- **10M run**: 10 000 001 cases and 27.9M events. Report request 17–24 ms (target 100), history of
+  400 events 4–6 ms (target 200); repeated runs, new-connection runs and a run after a PostgreSQL
+  restart, with the raw `EXPLAIN`, in `docs/PERFORMANCE.md` (NOTES 2.29).
+- **Contract step for the report indexes**: the summary measured without the phase 1 indexes
+  (same time), then `cases_at_risk_idx` and `cases_breached_idx` dropped with
+  `DROP INDEX CONCURRENTLY` (D-48).
+- **D-13 confirmed**: no partitioning. Retention of `case_events` recorded as an open decision
+  (D-49), nothing built.
+
+**Remaining**
+
 - `docs/SLOS.md`: what pages someone at 3am (a breached deadline that was not at risk the day before,
   sweep lag from `maxLagSeconds`, a failed event write).
 
-**Exit criteria:** scenario 3 under 200 ms and scenario 4 under 100 ms, measured; D-13 (no
-partitioning) confirmed or reversed with numbers.
+**Exit criteria:** scenario 3 under 200 ms and scenario 4 under 100 ms, measured (met); D-13 (no
+partitioning) confirmed or reversed with numbers (confirmed); `docs/SLOS.md` written.
 
 ---
 

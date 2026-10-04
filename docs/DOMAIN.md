@@ -392,8 +392,8 @@ So (D-43):
 ```
 
 The page is chosen from covering indexes alone (`cases_queue_idx`, `cases_queue_breached_idx`) and
-only its rows are read from the table; on the 1M-case fixture a page takes about 1 ms
-(`npm run perf:explain`, NOTES 2.24).
+only its rows are read from the table; a page takes about 1 ms on 1M cases and 5–6 ms on 10M
+(`npm run perf:explain`, [`PERFORMANCE.md`](./PERFORMANCE.md)).
 
 ---
 

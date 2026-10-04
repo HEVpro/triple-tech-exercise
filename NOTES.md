@@ -7,7 +7,7 @@ values most "the prompts that failed and how you caught the bad output". This fi
 version of that: what was asked, what came back, and what had to be corrected by hand.
 
 **The transcript itself is in [`docs/transcript.md`](./docs/transcript.md)**: every prompt and every
-answer of the session that built phases 0 to 4, in order, with one line per action the agent took.
+answer of the session, in order, with one line per action the agent took.
 It was exported from the Claude Code session and converted to Markdown; tool outputs and the
 agent's internal reasoning are left out, which is what makes 7.9 MB of raw log readable in about
 4 000 lines. Section 2 below is the index into it: each failure is told there, and can be found in
@@ -483,6 +483,39 @@ whole, three things were wrong although all 198 tests passed:
 - **A migration cited a document that did not exist** (`docs/PERFORMANCE.md`). The migration is
   applied, so its text cannot change; the document was written instead, with the measurements.
 
+### 2.29 The AI advised against the 10M run; the human asked for it anyway
+
+**What happened:** the brief's scenario 4 names a tenant of about ten million rows. Phase 4 measured
+on one million and argued the rest (a B-tree gains at most one level; the report depends on the
+size of the queue, not of the table). Planning phase 5, the AI recommended not running 10M at all
+and leaving the argument as the evidence. The human decided to measure.
+
+**What the run showed:** the argument held (first page 1.1 ms → 5–6 ms with a queue ten times
+larger, history 0.06 ms among 27.9M events as among 2.8M, the whole report request in 17–24 ms), so
+the recommendation would not have produced a wrong system. But it would have left the brief's own
+number unmeasured, and three things only the run could show: PostgreSQL switches the report to
+parallel plans at that size; the default page discards 50 781 of the 81 507 index entries it reads,
+because the queue index is shared with the summary; and timings on a new connection are about
+twice those on a warm one, which a single `EXPLAIN` hides. All three are in
+`docs/PERFORMANCE.md`. An argument is a prediction; the run is what turns it into evidence, and it
+cost 21 minutes.
+
+**A wording failure in the same step:** reporting the contract measurement, the AI wrote that the
+old indexes were "only used by the summary", and the human read it, reasonably, as "the summary
+needs them", which makes dropping them look like a regression. The fact was the opposite: the new
+indexes hold the same columns plus `id`, and the planner picked the old ones only because they are
+slightly smaller. The human asked for the reason in plain words before approving, and wanted the
+decision to rest on performance; the measurement (same time with and without, inside a rolled-back
+transaction) was what settled it, not the AI's recommendation. The write-side gain of dropping them
+was reasoned, not measured, and the documents say so.
+
+**A human decision recorded as an objection, not built:** on the growth of `case_events` the human
+set the direction (hot data in PostgreSQL, old data to Parquet on S3 queried with Athena, a warm
+tier to be thought through) and was explicit that nothing is to be done now (D-49). The AI's part
+was to write down what that policy collides with in this design: events cannot be deleted by
+anyone today, a case's history needs all its events, and bulk deletes are what would reopen
+partitioning.
+
 ---
 
 ## 3. Decision register
@@ -505,7 +538,7 @@ rejected column.
 | **D-10** (rev.) | `case_events` append-only by **grants** (`triple_app`: `SELECT`, `INSERT`), a **trigger** rejecting `UPDATE`/`DELETE`/`TRUNCATE` for every role, and **`ON DELETE RESTRICT`** to `cases`. `metadata JSONB` validated per type, ≤ 16 KB, no personal data. A future "delete" is a `CASE_VOIDED` event. | Audit that a single SQL statement can erase is not audit. | `ON DELETE CASCADE` (deleting a case erased its trail); convention only. |
 | **D-11** (rev.) | **Rules run on write only.** Events store `to_status`, `rule_key`, `ruleset_version`. History folds events with `recorded_at <= as_of` by `seq`, never evaluating a rule. 50 000-event cap with `truncated`. | The past must not depend on today's code or config (2.11). | Re-evaluating rules on read with `clock = as_of`; with `now()` (2.8). |
 | **D-12** (rev.) | v1 auth: locally minted HS256 tokens, refused in production; tenant and actor from claims only. Implemented in D-39. | Tests tenant isolation without IdP setup. | OIDC/JWKS in v1 (deferred, TRADEOFFS §15); identity from headers. |
-| **D-13** | **No partitioning.** Revisit on phase 5 evidence. | No hot query benefits; all are tenant-scoped and index-backed. | Partitioning up front. |
+| **D-13** (confirmed) | **No partitioning.** Confirmed in phase 5 on 10M cases and 27.9M events. | No measured query depends on a table's size: history uses the primary key (0.06 ms at both sizes), the report and the sweeper use partial indexes holding only the work queue (34 MB, 98 MB, 2 MB). Reopened only by bulk deletion of old events (D-49). | Partitioning up front. |
 | **D-14** | The migration runner supports **per-migration transaction control** (`-- migrate:no-transaction`, one statement per file). | `CREATE INDEX CONCURRENTLY` cannot run in a transaction and must stay in the migration system. | Wrapping every migration in a transaction. |
 | **D-15** | `typescript@5.9.3`, pinned exactly. | `typescript-eslint@8.71.0` requires `<6.1.0`. | `typescript@latest` (7.0.2). |
 | **D-16** | ESLint 10 flat config, `strictTypeChecked`, layer boundaries via `no-restricted-imports`, `perfectionist` ordering. | Type-aware rules catch defects; the domain cannot import infrastructure. | ESLint without types; layering by convention. |
@@ -527,6 +560,8 @@ rejected column.
 | **D-32** | Secret scanning with **gitleaks v8.30.1 in Docker** over the full history, in CI and as `npm run scan:secrets`. | A maintained scanner instead of 130 lines of local regexes. | The homemade guard script. |
 | **D-33** (rev.) | Runner: SHA-256 checksums, advisory lock, ledger named `triple_migrations`, refusal of a non-empty database without a ledger, `lock_timeout = 5s` for transactional migrations, **no timeouts for concurrent index builds** and cleanup of the `INVALID` index a failed build leaves, forward only. | Safe and auditable against live traffic (2.16). | A uniform `lock_timeout` and a global invalid-index check (2.16); `drizzle-kit` (2.3); a `down` command nobody tests. |
 | **D-34** | Greenfield schema with **live-safe migrations**, plus a written rollout plan for 60+ tenants (`docs/MIGRATION_PLAN.md`). No invented legacy import. | What the brief asks is that our migrations can run on live data. | Modelling and backfilling a hypothetical legacy database (2.13). |
+| **D-49** | **Retention of `case_events` is left open on purpose; nothing is built.** Recorded as an objection to the current design: the log is append-only and grows about 0.73 GB per million cases. Direction set by the human for when it is decided: recent events stay in PostgreSQL (hot), old ones move to cold storage (Parquet on S3, queried with Athena), a warm tier to be thought through. | It is a retention policy, which is a business and compliance decision, not a performance one: no query is slower because of the table's size (D-13). | Building an archiver now; deleting events by age (a case's status is the fold of all its events, so whole closed cases move, not single events; and D-10 forbids every delete today, so it needs its own authorised copy-verify-delete process). |
+| **D-48** | **Contract step:** `cases_at_risk_idx` and `cases_breached_idx` dropped with `DROP INDEX CONCURRENTLY`, one migration each. Performance is measured at **10M cases** as well as 1M (`docs/PERFORMANCE.md`, with the raw `EXPLAIN`). | The queue indexes (D-45) hold the same columns plus `id`; measured on 10M inside a rolled-back transaction, the summary takes the same time without the old pair (6.4–7.2 ms against 6.3–10.3 ms). Two indexes fewer on every write to `cases`, 102 MB freed (2.29). | Keeping both pairs; dropping without measuring the summary first. |
 | **D-47** | Reads made of several queries (the stuck-queue summary and page, a case and its events) run in one **read-only `REPEATABLE READ`** transaction (`transaction(work, { snapshot: true })` on the port). | One state of the database per answer: a report must not contradict itself (2.28). | Default `READ COMMITTED`, where each statement sees its own snapshot. |
 | **D-46** | Configuration in two parts: `runtimeEnv()` (database, logging, sweep interval) for every process, `apiEnv()` adding port and authentication for the HTTP API only; the dev-auth production refusal belongs to the API. | The sweeper must run in production and must not hold a secret it never uses (2.28). | One configuration object for every process. |
 | **D-45** | Report indexes `cases_queue_idx` and `cases_queue_breached_idx`: `(tenant_id, deadline_at)` covering `amount_base_minor`, `status`, `id`, partial on the queue's statuses; added `CONCURRENTLY` as an expand step, the phase 1 indexes dropped later. Status constants are SQL literals in the adapter so the planner can match the partial indexes. | Measured on 1M cases: page 32 ms → 1–3.5 ms, summary index-only (2.24). | An index ordered by amount (23 ms); editing the phase 1 migration. |
@@ -548,14 +583,17 @@ rejected column.
 Phases 0 to 4 are complete. Recorded so the gaps are explicit rather than discovered by a
 reviewer:
 
-- **Phase 5 is open**: the contract step that drops the phase 1 report indexes, the remaining
-  measurements in `docs/PERFORMANCE.md` (systematic cold and warm runs, 10M) and `docs/SLOS.md`.
+- **Phase 5 is open**: the performance part is done (10M run, contract step, D-13 confirmed);
+  `docs/SLOS.md` and the sweeper's metrics remain.
+- **Retention of `case_events` is undecided** (D-49): the log only grows. The direction is written
+  down (hot in PostgreSQL, cold in Parquet on S3); nothing is built.
+- **No read from a cold disk was measured.** Timings are with the data in memory; the operating
+  system's cache inside Docker could not be dropped. The write-side gain of dropping the two
+  indexes was reasoned, not measured.
 - **Seeded data is recorded at seeding time.** The trigger makes `recorded_at` the database clock, so
   a seeded case lost to its deadline shows `DEADLINE_EXPIRED` dated at the deadline but
   `CASE_CREATED` dated today. That is the system refusing to invent the past, as it would for any
   imported data.
-- **Report and history timings are measured on 1M cases, not 10M.** The scaling argument is in
-  TRADEOFFS §10; the generator takes `--rows 10000000` for whoever wants the run.
 - **The sweeper logs its results but exports no metrics**, and no alert exists yet; both are SLO
   work in phase 5.
 - **`deadline_tz = 'UTC'` is an assumption** to confirm against each scheme's rulebook.

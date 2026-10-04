@@ -16,7 +16,7 @@ The full register is in [`../NOTES.md`](../NOTES.md) section 3; the model itself
 | 1 | Visa, presentment 40 days ago, `OPEN` → at-risk, deadline in 5d | Deadline arithmetic and the report filter | Deadline is the end of day 45 in the scheme's zone (UTC); the case is `at_risk` with ~5 days left |
 | 2 | Mastercard, presentment 50 days ago, `OPEN` → breached | Time-driven loss without a human, deterministically | Rules are evaluated at creation, so the case is `LOST` immediately, and the report lists it as `breached` (§7) |
 | 3 | 400 events, 2 years old, history < 200 ms | Whether the audit trail is the truth | Primary key `(case_id, seq)` is exactly the history index; the fold reads stored statuses, no rule evaluation (§3) |
-| 4 | ~10M-row tenant, report < 100 ms, with `EXPLAIN` | Whether performance is measured or asserted | Partial covering index plus pagination; measured on a 1M fixture with the scaling argument written down (§10) |
+| 4 | ~10M-row tenant, report < 100 ms, with `EXPLAIN` | Whether performance is measured or asserted | Partial covering index plus pagination; measured on 1M and on 10M cases: 17–24 ms end to end (§10) |
 
 ---
 
@@ -198,9 +198,9 @@ The phase 1 index lacked `id`, which the order and the cursor need: it was desig
 it served (NOTES 2.24). An index ordered by amount was also measured and lost (23 ms): most
 deadline losses are old, so walking by amount discards thousands of entries to find last week's.
 
-**Why 1M, not 10M.** A B-tree page holds a few hundred entries, so three levels index ~27M rows: 1M
-and 10M both need three or four page reads to find where a tenant's range starts. After that, the
-cost depends on:
+**What the cost depends on.** A B-tree page holds a few hundred entries, so three levels index ~27M
+rows: 1M and 10M both need three or four page reads to find where a tenant's range starts. After
+that:
 
 | Factor | Grows with total rows? |
 | --- | --- |
@@ -211,12 +211,16 @@ cost depends on:
 | Index and heap fitting in memory | **yes** — the real difference between 1M and 10M |
 
 So the report's latency is governed by **the size of the at-risk set and whether the index is in
-memory, not by the table's row count**. The fixture uses a realistic distribution (three years of
-presentments, most cases closed, one large tenant among small ones); the plans and timings are in
+memory, not by the table's row count**. This was written before the 10M run and then checked
+against it (phase 5): with a queue ten times larger the first page went from 1.1 ms to 5–6 ms, the
+whole request takes 17–24 ms against the 100 ms target, and a 400-event history takes the same
+0.06 ms among 27.9M events as among 2.8M. Plans, timings and the raw `EXPLAIN` are in
 [`PERFORMANCE.md`](./PERFORMANCE.md).
 
-**Cost.** 10M is argued, not measured. Anyone can run the generator at 10M; it is just not the
-default on a laptop.
+**Cost.** Measured on a laptop with the data in memory; a read from a cold disk was not measured
+(the operating system's cache inside Docker could not be dropped). The default page discards the
+`UNDER_REVIEW` entries of the shared queue index (50 781 of 81 507 read at 10M); an `OPEN`-only
+index would avoid it at the price of another index on every write, which 6 ms does not justify.
 
 ---
 
@@ -253,9 +257,19 @@ configurability the brief asks for exists, but its practical reach is small.
 
 ## 13. Storage and migrations
 
-- **No partitioning** (D-13). Every hot query is tenant-scoped and index-backed; partitioning helps
-  time-based deletion and global aggregates, neither of which we have. Revisit on vacuum or bloat
-  evidence.
+- **No partitioning** (D-13), confirmed on 10M cases: history goes through the primary key and the
+  report and the sweeper through partial indexes holding only the work queue (34 MB, 98 MB, 2 MB
+  over a 2 GB table), so no measured query depends on a table's size.
+- **Retention of `case_events` is an open decision, not a design** (D-49). The log is append-only
+  and grows about 0.73 GB per million cases. Nothing is done now; the objection is recorded so the
+  decision is taken on purpose. The direction, when it is taken: keep recent events in PostgreSQL
+  (hot), move old ones to cold storage (Parquet on S3, queried with Athena), and decide whether a
+  warm tier in between is needed. Three constraints any such policy meets here: nobody can delete
+  an event today (grants and a trigger, D-10), so archiving needs its own authorised process that
+  copies, verifies, then deletes; a case's status is the fold of **all** its events, so what moves
+  is whole closed cases, not events by age; and deleting rows in bulk from an unpartitioned table
+  is slow and leaves bloat, which is what would reopen D-13, since dropping a partition is
+  instant.
 - **Per-migration transaction control** (D-14), so `CREATE INDEX CONCURRENTLY` lives inside the
   migration system. Cost: a concurrent build can fail halfway and leave an `INVALID` index; the runner
   drops the one it left so the retry is clean, and runs the build without timeouts so an open

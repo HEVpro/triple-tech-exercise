@@ -214,6 +214,7 @@ curl -s "http://localhost:3000/reports/stuck-queue?state=at_risk,breached,respon
 
 ```bash
 npm run seed:perf       # adds 1M cases with their full event history to your database, ~1 min
+                        # (-- --rows 10000000 for the brief's 10M: ~21 min, 10 GB)
 npm run perf:explain    # EXPLAIN (ANALYZE, BUFFERS) of the SQL the API actually runs
 ```
 
@@ -521,9 +522,9 @@ so a clean `npm install` resolves it; if node_modules is in a strange state, rem
 
 Phases 0 to 4 of 0–5 are complete: toolchain and gates, the schema and migration runner with the
 live-data plan, the domain core, the case API with development auth and tenant isolation, and the
-stuck-queue report with the deadline sweeper, measured on a million cases. Phase 5 is the
-performance write-up at scale and the SLOs. What is deliberately unfinished is listed in
-[`NOTES.md`](./NOTES.md) section 4.
+stuck-queue report with the deadline sweeper. Phase 5 is in progress: the report and the history
+are measured on ten million cases (17–24 ms and 4–6 ms per request); the SLOs remain. What is
+deliberately unfinished is listed in [`NOTES.md`](./NOTES.md) section 4.
 
 | Document | Contents |
 | --- | --- |
