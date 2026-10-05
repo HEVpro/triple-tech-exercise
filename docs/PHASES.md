@@ -170,7 +170,16 @@ partitioning) confirmed or reversed with numbers (confirmed); `docs/SLOS.md` wri
 
 ---
 
+## After the phases: the optional console
+
+The brief's optional one-page console, added once the backend was closed: `/console`, one static
+page over the public API (queue summary, table ordered by money, case history as of an instant).
+Alpine.js and Pico.css, no build step, development only (D-52, TRADEOFFS §16).
+
+---
+
 ## Not in scope
 
-A UI console, OIDC/JWKS, a rules admin API, outbound scheme integrations, evidence file storage,
-voiding cases, retroactive deadline revisions, partitioning (confirmed unnecessary in phase 5), an archive for old events (D-49).
+A frontend application (the console is a development page, TRADEOFFS §16), OIDC/JWKS, a rules admin
+API, outbound scheme integrations, evidence file storage, voiding cases, retroactive deadline
+revisions, partitioning (confirmed unnecessary in phase 5), an archive for old events (D-49).

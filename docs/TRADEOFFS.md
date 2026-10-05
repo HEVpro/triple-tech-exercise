@@ -349,4 +349,47 @@ ones under `/v1/...` as well, as an alias, would be additive and can be done at 
 | Tamper evidence | Gapless `seq` | Optional hash chain across events |
 | Monitoring | Signals sent through `src/monitoring` to Sentry, checked against a local stand-in ([`SLOS.md`](./SLOS.md)) | The monitors and their routing configured in the team's Sentry, and a way to read the objectives through the API when no provider is connected |
 | Invariant 3 audit | Run by hand (14 s on 10M cases) | A scheduled audit that pages on a mismatch |
-| UI | None | Optional console |
+| UI | One static page over the public API, development only (§16) | A frontend application: React with a component kit, its own build, real sign-in |
+
+---
+
+## 16. The console: one static page, not a frontend application
+
+**Decision.** The brief's optional console is one HTML page served by the API at `/console`, made
+interactive with Alpine.js and styled with Pico.css, both served from `node_modules`. It calls the
+public API from the browser with a token the user pastes (D-52).
+
+**Why.** The brief asks for "a one-page console (at-risk table + case history timeline)" and says
+to use libraries rather than write visual design. This gives exactly that with the least there is
+to run and explain:
+
+| | This console | A frontend application (React + Vite + a component kit) |
+| --- | --- | --- |
+| To run it | Nothing new: the API serves it | A second project, a build step, a second server in development |
+| Cross-origin | Same origin, no CORS | CORS added to the API, or a proxy |
+| Code | One page and one script, about 300 lines | Components, routing, state, a typed API client |
+| Typed and linted | No: plain JavaScript in the browser | Yes |
+| Component tests | No | Yes |
+| Grows well | No | Yes |
+
+It also proves something about the API: the page uses only what a bank would, three endpoints and
+no private one, so the published contract is enough to build a client on.
+
+**When this stops being the right choice.** For a frontend that analysts work in all day, the
+right-hand column is the answer: React with a component kit, a client generated from the OpenAPI
+document the API already serves, real sign-in, and tests. The left column was chosen because this
+is a technical exercise and the console is a way to look at the system, not a product.
+
+**Cost.**
+
+- The page's script is not type-checked or linted (it is outside the TypeScript project); a
+  renamed response field would break it silently. The frozen contracts make that rename fail the
+  build on the API side, which is the protection it has.
+- The token is pasted by hand and kept for the browser tab only. There is no sign-in because there
+  is no identity provider (§15); the console is not served in production.
+- It is read-only: no evidence, outcome or note can be recorded from it.
+- **It shows what the API returns and nothing more.** A trend over time (cases expiring per day,
+  losses per week) and the service level (the objectives in [`SLOS.md`](./SLOS.md)) are not on the
+  page because no endpoint provides them: the report is a snapshot, and the objectives are pushed
+  to the monitoring provider. Showing either means a new endpoint first, not more page.
+

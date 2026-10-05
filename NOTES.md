@@ -579,6 +579,28 @@ here: in an exercise no provider is connected, so an endpoint is the only way to
 The removal stands; the gap is recorded (`docs/SLOS.md`). The AI's recommendation was right about
 the team's tooling and missed the reviewer's situation.
 
+### 2.32 The console: what was asked for, and what the API can actually show
+
+**What happened:** with the backend closed, the human asked for the brief's optional frontend,
+"simple but functional". The AI proposed two ways (a static page served by the API, or a React
+application) and recommended the first. The human agreed, on condition that the reason is written
+down along with the fact that a serious frontend would be the React option (TRADEOFFS §16), and
+expected the page to show "the chart and the trend, states, service level, cases".
+
+**What the AI did not do:** build a trend or a service-level panel. Neither exists in the API: the
+report is a snapshot with no time series, and the objectives are pushed to the monitoring provider
+with nothing to read back (the gap recorded in `docs/SLOS.md`). Drawing them would have meant
+inventing numbers or adding endpoints nobody had designed, the error of 2.23 and 2.30. The page
+shows what there is (states with their money and counts, a bar for each one's share, the cases,
+the history as of an instant, and whether the service is ready) and the two missing things are
+named in TRADEOFFS §16 as needing an endpoint first.
+
+**How it was checked:** in a real browser against the ten-million-case database: the queue, the
+table, a case's history, and the same history as of an earlier instant. It showed something the
+tests do not: an `OPEN` case listed as `breached`, eight hours past its deadline, because no
+sweeper was running. That is the report telling the truth about a stopped sweeper, and the reason
+that alert pages (D-50).
+
 ### 2.33 Red CI again: a race the AI had handled for only one of its two errors
 
 **What happened:** after the phase 5 push the pipeline failed in one test file with `duplicate key
@@ -643,6 +665,7 @@ rejected column.
 | **D-32** | Secret scanning with **gitleaks v8.30.1 in Docker** over the full history, in CI and as `npm run scan:secrets`. | A maintained scanner instead of 130 lines of local regexes. | The homemade guard script. |
 | **D-33** (rev.) | Runner: SHA-256 checksums, advisory lock, ledger named `triple_migrations`, refusal of a non-empty database without a ledger, `lock_timeout = 5s` for transactional migrations, **no timeouts for concurrent index builds** and cleanup of the `INVALID` index a failed build leaves, forward only. | Safe and auditable against live traffic (2.16). | A uniform `lock_timeout` and a global invalid-index check (2.16); `drizzle-kit` (2.3); a `down` command nobody tests. |
 | **D-34** | Greenfield schema with **live-safe migrations**, plus a written rollout plan for 60+ tenants (`docs/MIGRATION_PLAN.md`). No invented legacy import. | What the brief asks is that our migrations can run on live data. | Modelling and backfilling a hypothetical legacy database (2.13). |
+| **D-52** | **The optional console is one static page** at `/console`: Alpine.js and Pico.css served from `node_modules`, calling the public API with a pasted token; read-only, not served in production. | The brief asks for a one-page console and for libraries over design. No second project, build step or CORS, and it uses only the published contract (2.32, TRADEOFFS §16). | A React application with a component kit: the right choice for a real frontend, too much to run and explain for a way of looking at the system. Building trend or service-level panels with no endpoint behind them. |
 | **D-51** | **The Prometheus `/metrics` endpoint and its client library are removed.** | Nothing read it: it waits to be scraped and the team has no Prometheus. It was added in phase 0 by the AI as a default nobody asked for, and cost a dependency, a middleware on every request and an unauthenticated endpoint. What it measured (request duration by route and status) is covered by the monitoring in D-50. | Keeping it in case a scraper appears: a decision to take with the company's infrastructure, not to pre-build. |
 | **D-50** | **SLOs watched with Sentry** (`docs/SLOS.md`). Pages: failed writes (requests answered with a 500) and a sweeper that stops or falls behind. Not pages: a breached deadline, late evidence (business outcomes, shown by the report), latency (ticket). Everything goes through `src/monitoring`, the only folder that names the provider (ESLint-enforced): the API reports only what it answers with a 500, plus a trace per request; every sweeper pass is watched on a schedule defined in code and pushes its lag. Off unless `SENTRY_DSN` is set. | The team uses Sentry (2.30). A page is for what an engineer can fix and what worsens by waiting. A scheduled one-pass sweeper cannot be scraped, so it must push. | A Prometheus gauge and PromQL rules (no consumer in the team); calling the provider from each process (changing it would touch them all); Sentry's default error filter (reports every business rejection); paging on breached deadlines. |
 | **D-49** | **Retention of `case_events` is left open on purpose; nothing is built.** Recorded as an objection to the current design: the log is append-only and grows about 0.73 GB per million cases. Direction set by the human for when it is decided: recent events stay in PostgreSQL (hot), old ones move to cold storage (Parquet on S3, queried with Athena), a warm tier to be thought through. | It is a retention policy, which is a business and compliance decision, not a performance one: no query is slower because of the table's size (D-13). | Building an archiver now; deleting events by age (a case's status is the fold of all its events, so whole closed cases move, not single events; and D-10 forbids every delete today, so it needs its own authorised copy-verify-delete process). |
@@ -659,7 +682,7 @@ rejected column.
 | **D-38** | **Drizzle**: schema in `src/infrastructure/db/schema` (constraints named as PostgreSQL names them), typed queries in the `CaseStore` adapter, drizzle-zod for request schemas, drizzle-kit `generate`/`check` (timestamp prefix, custom migrations for triggers, grants, `CONCURRENTLY`, reference data). **Our runner applies.** `0001`–`0010` kept as baseline; drift test and `db:schema:check` in CI. | Libraries before custom code, with the one verified gap kept custom: drizzle's migrator uses one transaction, no checksums, last-timestamp detection and no lock (2.20). | Hand-written SQL and no ORM (phases 0–2); drizzle-kit `migrate`; rewriting `0001`–`0010`. |
 | **D-37** | **Atomic commits from phase 3 on**: one logical change per commit, each green on its own, tests and docs with the code; imperative scoped titles that stand without the diff; bodies that give the reason and the `D-xx`/`NOTES` reference. Work is proposed as a commit plan approved once, and each commit is verified with `git rebase --exec`. Phases 0–2 stay as committed. | The history is a deliverable and must show how the system was built; small commits can be reviewed, bisected and reverted (2.19). | One commit per phase (what phases 0–2 did); rewriting the pushed history to hide it. |
 | **D-36** | `src/domain` is organised in **blocks** (`shared`, `money`, `deadline`, `rules`, `events`, `dispute`) with fixed file roles (`types`, `constants`, `schemas`, `errors`, `<action>`, `index`). ESLint enforces: import a block only via its `index.ts`; dependencies only in the direction `shared ← money, deadline ← rules ← events ← dispute`; Zod only in `events`. The aggregate block is `dispute`, not `case`, to avoid the reserved word. | You know where a thing lives before opening a file, and the architecture cannot erode silently. Zod stays in the domain for event metadata because that shape is an audit guarantee and duplicating Zod by hand buys nothing (2.18). | Folders by kind (`types/`, `functions/`…), which scatters one concept across four places; flat files (the phase 2 shape); conventions without lint. |
-| **D-35** | Scope: six phases (0–5); no console, no OIDC, no rules admin API, no voiding, no retroactive revisions. | The brief values a working result over breadth. | Seven phases with a console and full auth. |
+| **D-35** (rev.) | Scope: six phases (0–5); no console (added afterwards as a development page, D-52), no OIDC, no rules admin API, no voiding, no retroactive revisions. | The brief values a working result over breadth. | Seven phases with a console and full auth. |
 
 ---
 
@@ -675,6 +698,8 @@ reviewer:
   in this exercise none is connected. `/metrics` did that and was removed for lack of a consumer
   (D-51); the human pointed out afterwards that this is exactly why it was useful here. Not needed
   now and not built; recorded in `docs/SLOS.md` as a known gap, with where it would go.
+- **The console shows a snapshot.** No trend over time and no service level, because no endpoint
+  provides them; it is read-only and its script is not type-checked (TRADEOFFS §16).
 - **No scheduled audit of invariant 3** (a case equals its log). Run by hand only.
 - **Retention of `case_events` is undecided** (D-49): the log only grows. The direction is written
   down (hot in PostgreSQL, cold in Parquet on S3); nothing is built.
