@@ -17,7 +17,7 @@ Current status: **phases 0 to 4 complete.**
 | 2 | Domain core: money, deadline, rules, events | Is the business logic correct and auditable | done |
 | 3 | Case API with dev auth and tenant isolation | Do we keep the bank contract and reconstruct history truthfully | done |
 | 4 | Stuck-queue report and deadline sweeper | Do we find the money before the deadline does | done |
-| 5 | Performance evidence and SLOs | Does it hold at scale, measured | next |
+| 5 | Performance evidence and SLOs | Does it hold at scale, measured | done |
 
 ---
 
@@ -146,9 +146,9 @@ tested at the domain level.
 
 ---
 
-## Phase 5: Performance evidence and SLOs
+## Phase 5: Performance evidence and SLOs — done
 
-**Done**
+**Delivered**
 
 - **10M run**: 10 000 001 cases and 27.9M events. Report request 17–24 ms (target 100), history of
   400 events 4–6 ms (target 200); repeated runs, new-connection runs and a run after a PostgreSQL
@@ -158,18 +158,19 @@ tested at the domain level.
   `DROP INDEX CONCURRENTLY` (D-48).
 - **D-13 confirmed**: no partitioning. Retention of `case_events` recorded as an open decision
   (D-49), nothing built.
-
-**Remaining**
-
-- `docs/SLOS.md`: what pages someone at 3am (a breached deadline that was not at risk the day before,
-  sweep lag from `maxLagSeconds`, a failed event write).
+- **SLOs and on-call alerts** (`docs/SLOS.md`, D-50): of the brief's three candidates only a failed
+  history write pages; a stopped sweeper, which the brief does not list, pages too. `src/monitoring`
+  reports failed requests and request traces from the API, and each sweeper pass and its lag; it
+  is the only folder that names the provider (Sentry, the team's tool). Nothing is sent without
+  `SENTRY_DSN`.
+- **History contract frozen** (`test/contract/history-v1.ts`), like the case and the report (D-41).
 
 **Exit criteria:** scenario 3 under 200 ms and scenario 4 under 100 ms, measured (met); D-13 (no
-partitioning) confirmed or reversed with numbers (confirmed); `docs/SLOS.md` written.
+partitioning) confirmed or reversed with numbers (confirmed); `docs/SLOS.md` written (done).
 
 ---
 
 ## Not in scope
 
 A UI console, OIDC/JWKS, a rules admin API, outbound scheme integrations, evidence file storage,
-voiding cases, retroactive deadline revisions, partitioning (until phase 5 says otherwise).
+voiding cases, retroactive deadline revisions, partitioning (confirmed unnecessary in phase 5), an archive for old events (D-49).

@@ -290,7 +290,8 @@ OpenAPI definition, so the contract cannot drift from the implementation.
 | `GET` | `/reports/stuck-queue` | Summary of every state, and at-risk and breached cases ordered by money | done |
 
 Paths are unversioned because banks already consume `GET /cases/:id`; changes are additive only,
-and `test/contract/case-v1.ts` fails the build if a published field is removed, renamed or retyped.
+and the frozen contracts in `test/contract/` (case, history, stuck-queue report) fail the build if a
+published field is removed, renamed or retyped.
 The API accepts and returns `amount_cents`, the brief's field, alongside `amount_minor`. Every
 `/cases` route needs a bearer token; see [How to run it and call it](#how-to-run-it-and-call-it).
 The full contract is in [`docs/DOMAIN.md`](./docs/DOMAIN.md#http-contract).
@@ -344,7 +345,7 @@ an import that goes the other way or reaches into a block's internal file. The c
 The full register, with rejected alternatives, is in [`NOTES.md`](./NOTES.md).
 
 **[`docs/PHASES.md`](./docs/PHASES.md)** — the delivery phases, what each one delivers and its exit
-criteria. Phases 0 to 4 are complete.
+criteria. All six phases are complete.
 
 **[`docs/DOMAIN.md`](./docs/DOMAIN.md)** — states, terminal rules, entities, flows, invariants and use
 cases, written to be read without reading the code.
@@ -477,10 +478,12 @@ automatically.
 | `JWT_SECRET` | — | HS256 secret, at least 32 characters |
 | `JWT_ISSUER` / `JWT_AUDIENCE` | — | Checked on every request |
 
-The deadline sweeper reads only the database, logging and `SWEEP_INTERVAL_MS` settings: it needs no
+The deadline sweeper reads only the database, logging, monitoring and `SWEEP_INTERVAL_MS` settings: it needs no
 JWT secret and runs with `NODE_ENV=production`; the authentication settings belong to the API
 alone.
 | `SWEEP_INTERVAL_MS` | `60000` | Deadline sweeper period (phase 4) |
+| `SENTRY_DSN` | — | Optional. Enables monitoring in the API and the sweeper ([`docs/SLOS.md`](./docs/SLOS.md)); nothing is sent without it |
+| `SENTRY_TRACES_SAMPLE_RATE` | `1` | Share of requests traced, 0 to 1 |
 
 ---
 
@@ -518,11 +521,12 @@ so a clean `npm install` resolves it; if node_modules is in a strange state, rem
 
 ## Project status
 
-Phases 0 to 4 of 0–5 are complete: toolchain and gates, the schema and migration runner with the
+All six phases (0–5) are complete: toolchain and gates, the schema and migration runner with the
 live-data plan, the domain core, the case API with development auth and tenant isolation, and the
-stuck-queue report with the deadline sweeper. Phase 5 is in progress: the report and the history
-are measured on ten million cases (17–24 ms and 4–6 ms per request); the SLOs remain. What is
-deliberately unfinished is listed in [`NOTES.md`](./NOTES.md) section 4.
+stuck-queue report with the deadline sweeper. Phase 5 measured the report and the history on ten
+million cases (17–24 ms and 4–6 ms per request) and defined the SLOs and the on-call alerts
+([`docs/SLOS.md`](./docs/SLOS.md)). What is deliberately unfinished is listed in
+[`NOTES.md`](./NOTES.md) section 4.
 
 | Document | Contents |
 | --- | --- |
@@ -531,6 +535,7 @@ deliberately unfinished is listed in [`NOTES.md`](./NOTES.md) section 4.
 | [`docs/TRADEOFFS.md`](./docs/TRADEOFFS.md) | Trade-offs per review scenario, deviations from the brief |
 | [`docs/MIGRATION_PLAN.md`](./docs/MIGRATION_PLAN.md) | Migrations against live data for 60+ tenants |
 | [`docs/PERFORMANCE.md`](./docs/PERFORMANCE.md) | Measured plans and timings for review scenarios 3 and 4 |
+| [`docs/SLOS.md`](./docs/SLOS.md) | What the service promises, which alerts page the person on call, and how it is watched |
 | [`NOTES.md`](./NOTES.md) | How AI was used, failed prompts, decision register, open gaps |
 | [`docs/transcript.md`](./docs/transcript.md) | The agent transcript: every prompt, answer and action, in order |
 | [`AGENTS.md`](./AGENTS.md) | Rules for coding agents |

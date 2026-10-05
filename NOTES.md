@@ -516,6 +516,47 @@ was to write down what that policy collides with in this design: events cannot b
 anyone today, a case's history needs all its events, and bulk deletes are what would reopen
 partitioning.
 
+### 2.30 The AI designed the alerts for a tool the company does not use
+
+**What happened:** asked to explain the SLO work before doing it, the AI proposed a new gauge on
+the Prometheus `/metrics` endpoint and alert rules written in PromQL. It never asked what the team
+monitors with; it assumed Prometheus because phase 0 had added a `/metrics` endpoint, which was
+itself an unasked default. The human answered that the company uses Sentry.
+
+**What changed:** the plan, entirely. With Sentry the sweeper needs no database gauge and no
+endpoint to be scraped, which a one-pass scheduled job could not offer anyway: it checks in with a
+cron monitor on every pass and pushes its lag as a metric. Errors and latency come from Sentry's
+Hono integration. The design got smaller, not larger (D-50). The same class of error as 2.23:
+filling a gap in the brief with an assumption instead of a question.
+
+**What the library did by default, found in its source:** Sentry's Hono integration reports every
+error that does not carry a 3xx/4xx `status`. `CaseError` carries none, so with the documented
+setup every late-evidence `409` and every unknown-case `404` would have been an error event, and
+the "failed write" alert would have paged on exactly what `docs/SLOS.md` says must not page. It was
+found by reading `defaultShouldHandleError` in the installed package before wiring it, then proved:
+the test that checks a rejection is not reported fails with Sentry's default and passes with the
+project's filter.
+
+**Verified without a Sentry account:** a local HTTP server stood in for Sentry and recorded what
+the API and the sweeper sent: both check-ins with the monitor's configuration, the lag metric, one
+trace per request named by route, and no error event for a `404`. What was *not* verified is the
+Sentry side (creating the monitors, routing a page), and the document says so.
+
+**Coupled to the provider, caught by the human:** the first implementation called Sentry from
+four places (the API's entry point, an HTTP middleware file, the sweeper, a shared options file),
+with files named after it. The human asked for the provider to be abstracted so that changing it
+is possible, in the code and in the commit titles. Everything that names Sentry now lives in
+`src/monitoring`, behind functions named for what they do (`trackErrors`, `watchSchedule`,
+`recordGauge`), and an ESLint rule rejects the import anywhere else. The same review removed the
+Prometheus endpoint (D-51) and the "3am" of the brief from titles: the subject is which alerts
+need the person on call.
+
+**A side effect to record:** verifying the sweeper meant running `npm run sweep` against the
+development database, and it did its job: 5 461 seeded cases whose deadline had passed overnight
+were recorded as `DEADLINE_EXPIRED`. Correct behaviour, and append-only, but a write to the human's
+database that was not announced beforehand. The invariant check afterwards: 10 000 001 cases, 0
+mismatches.
+
 ---
 
 ## 3. Decision register
@@ -561,6 +602,7 @@ rejected column.
 | **D-33** (rev.) | Runner: SHA-256 checksums, advisory lock, ledger named `triple_migrations`, refusal of a non-empty database without a ledger, `lock_timeout = 5s` for transactional migrations, **no timeouts for concurrent index builds** and cleanup of the `INVALID` index a failed build leaves, forward only. | Safe and auditable against live traffic (2.16). | A uniform `lock_timeout` and a global invalid-index check (2.16); `drizzle-kit` (2.3); a `down` command nobody tests. |
 | **D-34** | Greenfield schema with **live-safe migrations**, plus a written rollout plan for 60+ tenants (`docs/MIGRATION_PLAN.md`). No invented legacy import. | What the brief asks is that our migrations can run on live data. | Modelling and backfilling a hypothetical legacy database (2.13). |
 | **D-51** | **The Prometheus `/metrics` endpoint and its client library are removed.** | Nothing read it: it waits to be scraped and the team has no Prometheus. It was added in phase 0 by the AI as a default nobody asked for, and cost a dependency, a middleware on every request and an unauthenticated endpoint. What it measured (request duration by route and status) is covered by the monitoring in D-50. | Keeping it in case a scraper appears: a decision to take with the company's infrastructure, not to pre-build. |
+| **D-50** | **SLOs watched with Sentry** (`docs/SLOS.md`). Pages: failed writes (requests answered with a 500) and a sweeper that stops or falls behind. Not pages: a breached deadline, late evidence (business outcomes, shown by the report), latency (ticket). Everything goes through `src/monitoring`, the only folder that names the provider (ESLint-enforced): the API reports only what it answers with a 500, plus a trace per request; every sweeper pass is watched on a schedule defined in code and pushes its lag. Off unless `SENTRY_DSN` is set. | The team uses Sentry (2.30). A page is for what an engineer can fix and what worsens by waiting. A scheduled one-pass sweeper cannot be scraped, so it must push. | A Prometheus gauge and PromQL rules (no consumer in the team); calling the provider from each process (changing it would touch them all); Sentry's default error filter (reports every business rejection); paging on breached deadlines. |
 | **D-49** | **Retention of `case_events` is left open on purpose; nothing is built.** Recorded as an objection to the current design: the log is append-only and grows about 0.73 GB per million cases. Direction set by the human for when it is decided: recent events stay in PostgreSQL (hot), old ones move to cold storage (Parquet on S3, queried with Athena), a warm tier to be thought through. | It is a retention policy, which is a business and compliance decision, not a performance one: no query is slower because of the table's size (D-13). | Building an archiver now; deleting events by age (a case's status is the fold of all its events, so whole closed cases move, not single events; and D-10 forbids every delete today, so it needs its own authorised copy-verify-delete process). |
 | **D-48** | **Contract step:** `cases_at_risk_idx` and `cases_breached_idx` dropped with `DROP INDEX CONCURRENTLY`, one migration each. Performance is measured at **10M cases** as well as 1M (`docs/PERFORMANCE.md`, with the raw `EXPLAIN`). | The queue indexes (D-45) hold the same columns plus `id`; measured on 10M inside a rolled-back transaction, the summary takes the same time without the old pair (6.4–7.2 ms against 6.3–10.3 ms). Two indexes fewer on every write to `cases`, 102 MB freed (2.29). | Keeping both pairs; dropping without measuring the summary first. |
 | **D-47** | Reads made of several queries (the stuck-queue summary and page, a case and its events) run in one **read-only `REPEATABLE READ`** transaction (`transaction(work, { snapshot: true })` on the port). | One state of the database per answer: a report must not contradict itself (2.28). | Default `READ COMMITTED`, where each statement sees its own snapshot. |
@@ -569,7 +611,7 @@ rejected column.
 | **D-44** | The sweeper is one function, `sweepDeadlines`, with two entry points: `npm run worker` (loop, this exercise) and `npm run sweep` (one pass). Production runs the one-pass form from a scheduler (EventBridge + Lambda, Kubernetes CronJob) every minute. | One code path whatever the deployment; a scheduler gives retries, history and no idle process (TRADEOFFS §7b). | A sweeper inside the API process; `pg_cron`. |
 | **D-43** | `GET /reports/stuck-queue`: `summary` of `at_risk`, `breached`, `responded` always; `items` of `at_risk,breached` by default, `?state=` for any combination; ordered by base-currency amount then id; opaque keyset cursor; `seconds_to_deadline` per item; frozen v1 contract. | The brief's filter has no lower bound, so answered cases would bury the actionable ones; nothing is hidden, the brief's set is one parameter away (TRADEOFFS §7c). | The brief's literal filter as the default list; dropping responded cases; offset pagination. |
 | **D-42** | The API connects as `triple_api`, a login role in `triple_app`, created by `npm run dev:seed` from `DATABASE_URL`; migrations and the seed use the owner's `MIGRATION_DATABASE_URL`. API tests run as `triple_api` too. | In the running system, not just in a test, the API cannot update or delete the audit trail or immutable case columns. | Connecting as the owner and relying on the trigger alone. |
-| **D-41** | A frozen v1 case contract in `test/contract/case-v1.ts`, written by hand, non-strict, applied to every case response in the API tests. | Proves compatibility instead of promising it: adding a field passes, removing, renaming or retyping one fails. Derived from the code, it would change along with the bug. | The original exit criterion ("adding a field keeps assertions green"), which proved nothing. |
+| **D-41** | A frozen v1 case contract in `test/contract/case-v1.ts`, written by hand, non-strict, applied to every case response in the API tests. The history response is frozen the same way in `history-v1.ts` (phase 5). | Proves compatibility instead of promising it: adding a field passes, removing, renaming or retyping one fails. Derived from the code, it would change along with the bug. | The original exit criterion ("adding a field keeps assertions green"), which proved nothing. |
 | **D-40** | One error envelope `{ error: { code, message, details? } }` for every failure, including Zod validation (route default hook), unknown routes and readiness; stable `code` list in `src/http/errors.ts`. | Integrators branch on `code`; one shape means one error handler on their side. | `@hono/zod-openapi`'s default validation response and ad hoc bodies per route. |
 | **D-39** | Auth with `hono/jwt` (no new dependency): HS256, `iss`, `aud`, and `exp`, `sub`, `tenant_id`, `actor_type` required; `system` refused. Tokens come from `npm run dev:token`; the API has no issuing endpoint. The server refuses to start with `NODE_ENV=production` until a real mode exists. | The current use case is local development and tests; OIDC later is `verifyWithJwks` from the same library. | `jose`; an HTTP endpoint that mints tokens; trusting hono/jwt's optional `exp` check (2.21). |
 | **D-38** | **Drizzle**: schema in `src/infrastructure/db/schema` (constraints named as PostgreSQL names them), typed queries in the `CaseStore` adapter, drizzle-zod for request schemas, drizzle-kit `generate`/`check` (timestamp prefix, custom migrations for triggers, grants, `CONCURRENTLY`, reference data). **Our runner applies.** `0001`–`0010` kept as baseline; drift test and `db:schema:check` in CI. | Libraries before custom code, with the one verified gap kept custom: drizzle's migrator uses one transaction, no checksums, last-timestamp detection and no lock (2.20). | Hand-written SQL and no ORM (phases 0–2); drizzle-kit `migrate`; rewriting `0001`–`0010`. |
@@ -581,11 +623,15 @@ rejected column.
 
 ## 4. What is deliberately unfinished at this stage
 
-Phases 0 to 4 are complete. Recorded so the gaps are explicit rather than discovered by a
+All six phases are complete. Recorded so the gaps are explicit rather than discovered by a
 reviewer:
 
-- **Phase 5 is open**: the performance part is done (10M run, contract step, D-13 confirmed);
-  `docs/SLOS.md` and the sweeper's metrics remain.
+- **The Sentry side is not configured or tried.** The code sends the signals (checked against a
+  local stand-in); the monitors in `docs/SLOS.md` have to be created in the team's Sentry, and their
+  thresholds (99.9%, 5 and 15 minutes) are proposals to agree with the operation.
+- **No scrape endpoint.** `/metrics` was removed for lack of a consumer (D-51); whether the
+  platform needs one is to be settled with the company's infrastructure.
+- **No scheduled audit of invariant 3** (a case equals its log). Run by hand only.
 - **Retention of `case_events` is undecided** (D-49): the log only grows. The direction is written
   down (hot in PostgreSQL, cold in Parquet on S3); nothing is built.
 - **No read from a cold disk was measured.** Timings are with the data in memory; the operating
@@ -595,8 +641,6 @@ reviewer:
   a seeded case lost to its deadline shows `DEADLINE_EXPIRED` dated at the deadline but
   `CASE_CREATED` dated today. That is the system refusing to invent the past, as it would for any
   imported data.
-- **The sweeper logs its results but exports no metrics**, and no alert exists yet; both are SLO
-  work in phase 5.
 - **`deadline_tz = 'UTC'` is an assumption** to confirm against each scheme's rulebook.
 - **The FX table is a placeholder** for the exercise (TRADEOFFS §15).
 - **Auth is development-only.** Tokens are minted locally with a shared secret; the server refuses

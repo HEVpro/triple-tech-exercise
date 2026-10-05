@@ -10,6 +10,7 @@ brief is [`technical-exercise.md`](./technical-exercise.md). Before changing beh
 - [`docs/DOMAIN.md`](./docs/DOMAIN.md) — states, rules, clocks, entities, API contract, invariants.
 - [`docs/TRADEOFFS.md`](./docs/TRADEOFFS.md) — why each decision was made and what was rejected.
 - [`docs/PHASES.md`](./docs/PHASES.md) — what is done and what comes next.
+- [`docs/SLOS.md`](./docs/SLOS.md) — what is monitored, what pages, and why.
 - [`NOTES.md`](./NOTES.md) section 3 — the decision register (`D-n`).
 
 If a change contradicts a decision, say so and update the register; do not silently diverge.
@@ -46,6 +47,8 @@ src/infrastructure  Drizzle schema (db/schema), the CaseStore adapter (db/case-s
 src/http            routes, request/response schemas (drizzle-zod + @hono/zod-openapi), auth,
                     error envelope
 src/worker          deadline sweeper
+src/monitoring      what the processes report (docs/SLOS.md); the only folder that names the
+                    provider, Sentry (ESLint-enforced)
 scripts/            CLIs only: migrate, dev-seed, dev-token (+ dev-tenants), seed-perf, perf-explain.
 ```
 
@@ -104,7 +107,7 @@ shared  <-  money, deadline  <-  rules  <-  events  <-  dispute
 ## Libraries before custom code
 
 The stack was chosen to be used: Hono (and its helpers, e.g. `hono/jwt`), `@hono/zod-openapi`, Zod,
-Drizzle ORM, drizzle-zod, drizzle-kit, pg, Pino, Vitest. **Do not reinvent what they already do.**
+Drizzle ORM, drizzle-zod, drizzle-kit, pg, Pino, Sentry (through `src/monitoring` only), Vitest. **Do not reinvent what they already do.**
 
 Before writing custom infrastructure (a runner, a validator, a query helper, an auth check):
 
@@ -133,6 +136,11 @@ Before writing custom infrastructure (a runner, a validator, a query helper, an 
   builder lacks (`now()`, `NULLS LAST`, `version + 1`).
 - **A process reads only the configuration it uses.** `runtimeEnv()` for anything that runs (the
   sweeper included), `apiEnv()` only in the HTTP API. Never hand a process a secret it does not use.
+- **Never import the monitoring provider outside `src/monitoring`.** Call that folder's functions;
+  changing provider must mean rewriting that folder only.
+- **Only what the API answers with a 500 is a failure for monitoring.** A business rejection
+  (`CaseError`, a 4xx) is an answer; reporting it would page on the bank's own mistakes
+  ([`docs/SLOS.md`](./docs/SLOS.md)).
 - **No `console`** in `src/`; use `logger()` from `src/logger.ts`. Inline `eslint-disable` is ignored
   by config.
 

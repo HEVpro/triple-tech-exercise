@@ -329,4 +329,6 @@ Each is reversible at low cost.
 | Retroactive rulings | Not implemented (`DEADLINE_REVISED` reserved) | Audited batch that appends events |
 | Voiding a case | Not implemented (`CASE_VOIDED` reserved) | Event-based soft delete, never a row delete |
 | Tamper evidence | Gapless `seq` | Optional hash chain across events |
+| Monitoring | Signals sent through `src/monitoring` to Sentry, checked against a local stand-in ([`SLOS.md`](./SLOS.md)) | The monitors and their routing configured in the team's Sentry; thresholds agreed with the operation |
+| Invariant 3 audit | Run by hand (14 s on 10M cases) | A scheduled audit that pages on a mismatch |
 | UI | None | Optional console |
