@@ -36,6 +36,17 @@ describe('API configuration', () => {
     })
   })
 
+  it('leaves monitoring off unless a Sentry DSN is configured', () => {
+    expect(runtimeEnv().SENTRY_DSN).toBeUndefined()
+    withEnv({ SENTRY_DSN: 'https://public@sentry.example/1' }, () => {
+      resetEnvCache()
+      expect(runtimeEnv()).toMatchObject({
+        SENTRY_DSN: 'https://public@sentry.example/1',
+        SENTRY_TRACES_SAMPLE_RATE: 1,
+      })
+    })
+  })
+
   it('rejects an unknown log level', () => {
     withEnv({ LOG_LEVEL: 'verbose' }, () => {
       expect(() => apiEnv()).toThrow()

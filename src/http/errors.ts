@@ -60,15 +60,17 @@ export function handleError(error: Error, c: Context<AppEnv>): Response {
       : undefined
     return c.json(errorBody(error.code, error.message, details), CASE_ERROR_STATUS[error.code])
   }
-  if (
-    error instanceof EventValidationError ||
-    error instanceof DeadlineError ||
-    error instanceof MoneyError
-  ) {
+  if (isDomainValidationError(error)) {
     return c.json(errorBody('validation_failed', error.message), 400)
   }
   logger().error({ err: error, requestId: c.get('requestId') }, 'unhandled error')
   return c.json(errorBody('internal_error', 'internal error'), 500)
+}
+
+// An error the API answers with a 4xx on purpose: a business rejection or invalid input. Anything
+// else is a defect or an outage: a 500, and the only kind monitoring reports as a failure.
+export function isExpectedError(error: unknown): boolean {
+  return error instanceof CaseError || isDomainValidationError(error)
 }
 
 // The default hook of every route: a request that fails its Zod schema gets the same envelope
@@ -83,4 +85,12 @@ export function validationHook(
     path: issue.path.join('.'),
   }))
   return c.json(errorBody('validation_failed', 'the request is not valid', details), 400)
+}
+
+function isDomainValidationError(error: unknown): boolean {
+  return (
+    error instanceof EventValidationError ||
+    error instanceof DeadlineError ||
+    error instanceof MoneyError
+  )
 }

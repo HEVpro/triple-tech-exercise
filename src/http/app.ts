@@ -41,6 +41,8 @@ const openApiConfig = {
 export interface AppDependencies {
   auth: AuthConfig
   caseStore: CaseStore
+  // Registers middleware that must see every request, before any route: monitoring.
+  instrument?: (app: OpenAPIHono<AppEnv>) => void
   // Readiness: resolves when the database answers.
   ping: () => Promise<unknown>
 }
@@ -49,6 +51,8 @@ export interface AppDependencies {
 // database and src/index.ts against the real one.
 export function createApp(deps: AppDependencies): OpenAPIHono<AppEnv> {
   const app = new OpenAPIHono<AppEnv>({ defaultHook: validationHook })
+
+  deps.instrument?.(app)
 
   app.use('*', requestId())
 

@@ -70,6 +70,12 @@ const DOMAIN_OUTER_LAYERS = {
   message: 'src/domain must not depend on outer layers.',
 }
 
+// The monitoring provider is named in one folder, so changing it does not touch the rest.
+const MONITORING_PROVIDER_ONLY = {
+  group: ['@sentry/*'],
+  message: 'Only src/monitoring may import the monitoring provider; call its functions instead.',
+}
+
 // ESLint replaces, rather than merges, a rule's options when several config objects match the
 // same file, so each block's config restates the domain-wide restrictions.
 /**
@@ -83,6 +89,7 @@ function domainBlock(block, allowed) {
   const patterns = [
     DOMAIN_FORBIDDEN_PACKAGES,
     DOMAIN_OUTER_LAYERS,
+    MONITORING_PROVIDER_ONLY,
     {
       message: `Import another domain block through its index.ts (../<block>/index.js).`,
       regex: String.raw`^\.\./(?!\.\.)[^/]+/(?!index\.js$)`,
@@ -173,6 +180,18 @@ export default defineConfig(
   },
 
   {
+    files: ['src/**/*.ts'],
+    ignores: ['src/monitoring/**'],
+    name: 'layering/monitoring-provider',
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [DOMAIN_PUBLIC_API_ONLY, MONITORING_PROVIDER_ONLY] },
+      ],
+    },
+  },
+
+  {
     files: ['src/domain/**/*.ts'],
     name: 'domain/purity',
     rules: {
@@ -209,6 +228,7 @@ export default defineConfig(
         {
           patterns: [
             DOMAIN_PUBLIC_API_ONLY,
+            MONITORING_PROVIDER_ONLY,
             {
               group: ['**/http/**', '**/worker/**'],
               message: 'src/application must not depend on delivery layers.',

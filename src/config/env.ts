@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 // Configuration, in two parts, so each process receives only what it uses.
 //
-//   runtimeEnv()  what every process needs: database, logging, the sweep interval. The deadline
+//   runtimeEnv()  what every process needs: database, logging, monitoring, the sweep interval. The deadline
 //                 sweeper reads only this, so it needs no JWT secret and can run in production.
 //   apiEnv()      runtimeEnv() plus the HTTP API's own settings: port and authentication.
 //
@@ -20,6 +20,10 @@ const runtimeSchema = z.object({
   DATABASE_URL: z.url(),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).default('info'),
   NODE_ENV: z.enum(['development', 'test', 'production']),
+  // Monitoring (src/monitoring, docs/SLOS.md). Without a DSN nothing is initialised or sent.
+  SENTRY_DSN: z.url().optional(),
+  // Share of requests traced; the latency objectives are measured on these. Lower it at volume.
+  SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(1),
   SWEEP_INTERVAL_MS: z.coerce.number().int().min(1_000).default(60_000),
 })
 
