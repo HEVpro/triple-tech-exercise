@@ -12,6 +12,7 @@ import { logger } from '../logger.js'
 import { SERVICE_NAME, VERSION } from '../version.js'
 import { type AuthConfig, authenticate } from './auth.js'
 import { caseRoutes } from './cases/routes.js'
+import { mountConsole } from './console.js'
 import { errorBody, handleError, validationHook } from './errors.js'
 import { reportRoutes } from './reports/routes.js'
 
@@ -41,6 +42,8 @@ const openApiConfig = {
 export interface AppDependencies {
   auth: AuthConfig
   caseStore: CaseStore
+  // Serves the development console at /console. Off unless asked for.
+  console?: boolean
   // Registers middleware that must see every request, before any route: monitoring.
   instrument?: (app: OpenAPIHono<AppEnv>) => void
   // Readiness: resolves when the database answers.
@@ -129,6 +132,8 @@ export function createApp(deps: AppDependencies): OpenAPIHono<AppEnv> {
   })
 
   app.route('/docs', Scalar.serve({ document: () => app.getOpenAPI31Document(openApiConfig) }))
+
+  if (deps.console) mountConsole(app)
 
   app.notFound((c) => c.json(errorBody('route_not_found', 'no such route'), 404))
   app.onError(handleError)

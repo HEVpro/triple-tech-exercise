@@ -49,9 +49,11 @@
   "dependencies": {
     "@hono/node-server": "^2.1.3",
     "@hono/zod-openapi": "^1.6.3",
+    "@picocss/pico": "2.1.1",
     "@scalar/hono-api-reference": "^0.12.9",
     "@sentry/hono": "11.4.0",
     "@sentry/node": "11.4.0",
+    "alpinejs": "3.17.4",
     "drizzle-orm": "^0.45.3",
     "drizzle-zod": "^0.8.3",
     "hono": "^4.13.12",

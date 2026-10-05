@@ -231,6 +231,23 @@ events that explain its status (`external_ref` `PERF-…`; `PERF-HISTORY-400` ha
   `npm run db:reset && npm run db:migrate && npm run dev:seed && npm run seed:perf`.
 - To look at the data directly: `docker exec -it triple-postgres psql -U triple -d triple`.
 
+### 9. The console (optional)
+
+With the API running, open <http://localhost:3000/console>, paste the token from step 4 and press
+**Load**:
+
+- **Queue**: money and number of cases at risk, breached and responded, with a bar for each one's
+  share of the money in the queue.
+- **Table**: the cases ordered by money, with their deadline and the time left; filter by state,
+  change the risk window, load more.
+- **History**: click a case to see every event (who, from which status to which, which rule
+  decided, when), and pick an instant to see the case as it was recorded then.
+
+It is one static page that calls the same API as the cURL commands above; it adds no endpoint and
+holds no logic. It is a development tool: it is not served when `NODE_ENV=production`. Why it is
+built this way, and what a real frontend would need instead, is in
+[`docs/TRADEOFFS.md`](./docs/TRADEOFFS.md) §16.
+
 ### Starting over
 
 ```bash
@@ -282,6 +299,7 @@ OpenAPI definition, so the contract cannot drift from the implementation.
 | `GET` | `/healthz` | Liveness. Does not touch the database. | done |
 | `GET` | `/readyz` | Readiness, including a real database round trip. | done |
 | `GET` | `/docs` | Interactive API reference. | done |
+| `GET` | `/console` | The development console (one page over this API). Not served in production. | done |
 | `GET` | `/docs/openapi.json` | Raw OpenAPI 3.1 document. | done |
 | `POST` | `/cases` | Create a case, idempotent on `external_ref` | done |
 | `GET` | `/cases/:id` | Current state | done |

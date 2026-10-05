@@ -16,6 +16,8 @@ const log = logger()
 const app = createApp({
   auth: { audience: config.JWT_AUDIENCE, issuer: config.JWT_ISSUER, secret: config.JWT_SECRET },
   caseStore: postgresCaseStore(database()),
+  // A development tool: it asks for a pasted token and has no login.
+  console: config.NODE_ENV !== 'production',
   // Only what the API answers with a 500 is a failure; business rejections are answers.
   instrument: (hono) => {
     trackErrors(hono, (error) => !isExpectedError(error))

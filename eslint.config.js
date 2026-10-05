@@ -116,7 +116,9 @@ function domainBlock(block, allowed) {
 
 export default defineConfig(
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'docs/**/*.md'],
+    // console/ is the browser page of the development console: plain JavaScript run by the
+    // browser, outside the TypeScript project this configuration type-checks.
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'docs/**/*.md', 'console/**'],
   },
 
   js.configs.recommended,

@@ -50,6 +50,8 @@ src/worker          deadline sweeper
 src/monitoring      what the processes report (docs/SLOS.md); the only folder that names the
                     provider, Sentry (ESLint-enforced)
 scripts/            CLIs only: migrate, dev-seed, dev-token (+ dev-tenants), seed-perf, perf-explain.
+console/            the development console: one static page and its script (Alpine.js,
+                    Pico.css), served at /console by src/http/console.ts. No logic, no build.
 ```
 
 The domain receives `now` as an argument. It never reads a clock.
@@ -107,7 +109,8 @@ shared  <-  money, deadline  <-  rules  <-  events  <-  dispute
 ## Libraries before custom code
 
 The stack was chosen to be used: Hono (and its helpers, e.g. `hono/jwt`), `@hono/zod-openapi`, Zod,
-Drizzle ORM, drizzle-zod, drizzle-kit, pg, Pino, Sentry (through `src/monitoring` only), Vitest. **Do not reinvent what they already do.**
+Drizzle ORM, drizzle-zod, drizzle-kit, pg, Pino, Sentry (through `src/monitoring` only), Vitest;
+Alpine.js and Pico.css for the console. **Do not reinvent what they already do.**
 
 Before writing custom infrastructure (a runner, a validator, a query helper, an auth check):
 
@@ -141,6 +144,8 @@ Before writing custom infrastructure (a runner, a validator, a query helper, an 
 - **Only what the API answers with a 500 is a failure for monitoring.** A business rejection
   (`CaseError`, a 4xx) is an answer; reporting it would page on the bank's own mistakes
   ([`docs/SLOS.md`](./docs/SLOS.md)).
+- **The console calls the public API only.** No endpoint exists for it, and no business rule is
+  written in `console/`: it shows what the API returns.
 - **No `console`** in `src/`; use `logger()` from `src/logger.ts`. Inline `eslint-disable` is ignored
   by config.
 

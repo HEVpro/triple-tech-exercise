@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dispute console</title>
+    <link rel="stylesheet" href="/console/vendor/pico.css" />
+    <script defer src="/console/app.js"></script>
+    <script defer src="/console/vendor/alpine.js"></script>
+  </head>
+  <body>
+    <main class="container-fluid" x-data="disputeConsole()" x-init="start()">
+      <header>
+        <hgroup>
+          <h1>Dispute console</h1>
+          <p>
+            Stuck queue and case history, read from the public API. Development only. Service:
+            <strong x-text="health"></strong>
+          </p>
+        </hgroup>
+        <form @submit.prevent="connect()">
+          <fieldset role="group">
+            <input
+              type="password"
+              x-model="token"
+              placeholder="Bearer token: npm run -s dev:token"
+              aria-label="Bearer token"
+              autocomplete="off"
+            />
+            <button type="submit" :aria-busy="loading">Load</button>
+          </fieldset>
+        </form>
+        <p x-show="error"><mark x-text="error"></mark></p>
+      </header>
+
+      <template x-if="report">
+        <section>
+          <h2>Queue</h2>
+          <p>
+            <small>
+              Base currency <span x-text="report.base_currency"></span>, risk window
+              <span x-text="report.risk_window_days"></span> days, as of
+              <span x-text="utc(report.generated_at)"></span>. Bars: share of the money in the
+              queue.
+            </small>
+          </p>
+          <div class="grid">
+            <template x-for="state in STATES" :key="state.key">
+              <article>
+                <header x-text="state.label"></header>
+                <h3
+                  x-text="money(report.summary[state.key].amount_base_minor, report.base_currency)"
+                ></h3>
+                <p>
+                  <span x-text="report.summary[state.key].count.toLocaleString('en')"></span> cases
+                </p>
+                <progress
+                  :value="report.summary[state.key].amount_base_minor"
+                  :max="totalExposure()"
+                ></progress>
+                <footer><small x-text="state.meaning"></small></footer>
+              </article>
+            </template>
+          </div>
+
+          <form @submit.prevent="loadReport()">
+            <fieldset class="grid">
+              <label>
+                Risk window (days)
+                <input type="number" min="1" max="90" x-model.number="riskWindowDays" />
+              </label>
+              <template x-for="state in STATES" :key="state.key">
+                <label>
+                  <input type="checkbox" :value="state.key" x-model="states" />
+                  <span x-text="state.label"></span>
+                </label>
+              </template>
+              <button type="submit" :aria-busy="loading">Apply</button>
+            </fieldset>
+          </form>
+
+          <div class="overflow-auto">
+            <table class="striped">
+              <thead>
+                <tr>
+                  <th>Case</th>
+                  <th>Scheme</th>
+                  <th>Status</th>
+                  <th>Queue state</th>
+                  <th>Deadline (UTC)</th>
+                  <th>Time left</th>
+                  <th>Amount</th>
+                  <th>In base currency</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="item in items" :key="item.id">
+                  <tr>
+                    <td>
+                      <a
+                        href="#history"
+                        @click.prevent="openCase(item.id)"
+                        x-text="item.external_ref"
+                      ></a>
+                    </td>
+                    <td x-text="item.scheme + ' ' + item.reason_code"></td>
+                    <td x-text="item.status"></td>
+                    <td x-text="item.deadline_state"></td>
+                    <td x-text="utc(item.deadline_at)"></td>
+                    <td x-text="timeLeft(item.seconds_to_deadline)"></td>
+                    <td
+                      x-text="money(item.amount_minor, item.currency, item.currency_exponent)"
+                    ></td>
+                    <td x-text="money(item.amount_base_minor, item.base_currency)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <p x-show="items.length === 0">No cases in the selected states.</p>
+          <button
+            class="secondary"
+            x-show="report.next_cursor"
+            @click="loadMore()"
+            :aria-busy="loading"
+          >
+            Load more
+          </button>
+        </section>
+      </template>
+
+      <template x-if="history">
+        <section id="history">
+          <h2>History of <span x-text="selected.external_ref"></span></h2>
+          <button type="button" class="outline secondary" @click="closeCase()">
+            Close this case
+          </button>
+          <form @submit.prevent="loadHistory()">
+            <fieldset role="group">
+              <input type="datetime-local" x-model="asOf" aria-label="As of (UTC)" />
+              <button type="submit">As of this instant (UTC)</button>
+              <button type="button" class="secondary" @click="asOf = ''; loadHistory()">Now</button>
+            </fieldset>
+          </form>
+
+          <article>
+            <template x-if="history.state">
+              <p>
+                At <span x-text="utc(history.as_of)"></span> the case was
+                <strong x-text="history.state.status"></strong
+                ><span x-show="history.decided_by"
+                  >, decided by rule <code x-text="history.decided_by?.rule_key"></code> at event
+                  <span x-text="history.decided_by?.seq"></span></span
+                >. Deadline <span x-text="utc(history.state.deadline_at)"></span>, amount
+                <span
+                  x-text="money(history.state.amount_minor, history.state.currency, history.state.currency_exponent)"
+                ></span
+                >.
+              </p>
+            </template>
+            <template x-if="!history.state">
+              <p>
+                At <span x-text="utc(history.as_of)"></span> the case had not been recorded yet.
+              </p>
+            </template>
+            <p x-show="history.truncated"><mark>The history is truncated.</mark></p>
+          </article>
+
+          <div class="overflow-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Recorded (UTC)</th>
+                  <th>Event</th>
+                  <th>Change</th>
+                  <th>Rule</th>
+                  <th>Who</th>
+                  <th>Reason and details</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="event in history.events" :key="event.seq">
+                  <tr>
+                    <td x-text="event.seq"></td>
+                    <td x-text="utc(event.recorded_at)"></td>
+                    <td x-text="event.type"></td>
+                    <td x-text="(event.from ?? '—') + ' → ' + event.to"></td>
+                    <td x-text="event.rule_key ?? ''"></td>
+                    <td x-text="event.actor.type + ': ' + event.actor.id"></td>
+                    <td>
+                      <span x-text="event.reason ?? ''"></span>
+                      <details>
+                        <summary>metadata</summary>
+                        <pre x-text="JSON.stringify(event.metadata, null, 2)"></pre>
+                      </details>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </template>
+    </main>
+  </body>
+</html>
