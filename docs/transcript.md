@@ -4882,12 +4882,334 @@ Antes de cambiarlo, un aviso: esto choca con una decisión registrada (D-27). La
 
 Cierto, de acuerdo, pero quiero dejarlo documentado entonces solo, añadelo, que lo mejor sería añadir versionado pero por  continuidad del servicio no se añade el versionado.
 
-<details><summary>5 actions</summary>
+<details><summary>6 actions</summary>
 
 - `Bash` — Check the README change and where the versioning decision is recorded
 - `Bash` — Find where path versioning is discussed
 - `Bash` — Commit the SLO notes, then document the versioning decision
 - `Bash` — Commit the versioning documentation
 - `export_transcript`
+- `Bash` — Regenerate and commit the transcript, then run the gates
+
+</details>
+
+**Agent:**
+
+Las rutas siguen sin versión y el motivo queda documentado. Hay **12 commits listos para tu push**; el último pasa typecheck, lint, formato, commitlint y los 208 tests.
+
+## Los tres commits de hoy
+
+| Commit | Qué hace |
+|---|---|
+| `d6f3965 docs(slos): record the agreed thresholds and the API observability gap` | Umbrales como acordados y el hueco de no poder leer los objetivos por la API |
+| `36cc032 docs(api): record why the paths carry no version` | La decisión sobre el versionado |
+| `7287e31 docs: extend the agent transcript to the final review` | Transcript regenerado con la sesión entera, hasta tu mensaje sobre `/v1` |
+
+## Dónde quedó lo del versionado
+
+- **`docs/TRADEOFFS.md` §14b, sección nueva.** Explica que una versión mayor en la ruta sería el mejor diseño para una API nueva, y que no se añade por continuidad del servicio: mover las rutas es justo el cambio que rompe a los bancos ya integrados. También dice qué se haría ante un cambio incompatible: publicar `/v2/...` junto a las rutas actuales.
+- **`docs/DOMAIN.md`, contrato HTTP.** El mismo razonamiento, resumido.
+- **NOTES D-27.** Queda marcada como confirmada.
+- **NOTES 2.31.** Cuenta la revisión final: pediste `/v1`, avisé de que chocaba con D-27 y con el brief, y decidiste documentarlo en lugar de cambiarlo. También recoge el caso contrario de la misma revisión, `/metrics`, donde mi recomendación acertó sobre vuestras herramientas pero no tuvo en cuenta la situación de quien revisa la prueba.
+
+## Un cambio tuyo sin commit
+
+`README.md` tiene una edición tuya que no he tocado ni incluido: la nota del paso 4 sobre cambiar `TOKEN` por `GLOBEX` en los cURL. Es lo único pendiente en el árbol de trabajo. Si quieres que entre, dímelo y hago el commit, o inclúyelo tú antes del push.
+
+Puedes hacer push cuando quieras.
+
+## Human (44)
+
+si porque quería acarlarlo porque al lanzar los curls no salían bien y vi que era el nombre del token y otra variable d etoken y querí adejarlo más claro. Bien, ahora habla de una posible construcción de un frontend. Quiero que me plantees algo sencillo pero funcional que abarcque tdoo lo del frontend, primero planteamlo y vemos como solucionarlo.
+
+<details><summary>1 action</summary>
+
+- `Bash` — Commit the README note and check CORS and report parameters
+
+</details>
+
+**Agent:**
+
+Tu nota del README ya está en un commit (`009039a docs(readme): say which token variable the examples use`). Son 13 commits pendientes de push.
+
+## Qué pide el brief sobre el frontend
+
+Es opcional: *"una consola de una página (tabla de casos en riesgo + línea temporal del historial de un caso), si te ayuda a pensar"*. También dice que no hace falta diseño ni CSS propio, y que se usen librerías o kits de componentes para llegar a algo que funcione.
+
+## Lo que propongo: una sola página con tres partes
+
+1. **Resumen de la cola.** Tres cifras con número de casos e importe: en riesgo, vencidos y respondidos.
+2. **Tabla de casos**, ordenada por dinero como el informe. Tendría filtro por estado, ventana de riesgo (7 días por defecto) y un botón "cargar más" que usa el cursor.
+3. **Historial del caso**, al pulsar una fila. Una línea temporal con cada evento: quién, de qué estado a cuál, qué regla decidió y cuándo. Llevaría un selector de fecha para ver el caso "tal como estaba el día X", que es la pregunta central del brief.
+
+La página solo consumiría la API pública que ya existe (`/reports/stuck-queue`, `/cases/:id`, `/cases/:id/history`), sin endpoints nuevos. Así también demuestra que el contrato le basta a un cliente real.
+
+## Cómo construirlo: dos caminos
+
+| | A. Página servida por la propia API | B. Aplicación aparte (React + Vite) |
+|---|---|---|
+| Qué es | Un HTML en `/console`, con una librería pequeña para la interactividad (Alpine.js) y un kit de estilos sin clases (Pico.css) | Un proyecto `web/` con su propio `package.json`, React y un kit de componentes |
+| Arranque | El mismo `npm run dev`; nada más que instalar ni levantar | Un segundo servidor y un paso de compilación |
+| CORS | No hace falta: mismo origen | Hay que añadirlo a la API, que hoy no lo tiene, o montar un proxy |
+| Tamaño | Unos 200–300 líneas en total | Bastante más: configuración, tipos, enrutado |
+| Encaja si | Es una consola interna de apoyo, como pide el brief | Se quisiera un producto de frontend que crezca |
+
+**Recomiendo A.** Cumple literalmente lo que pide el brief ("una página", "sin pulir", "usa librerías") y no añade un segundo proyecto que mantener y explicar. Las dos librerías se servirían desde `node_modules`, no desde un CDN, para que funcione sin conexión.
+
+## Problemas que hay que resolver en cualquier caso
+
+- **El token.** La API solo acepta tokens firmados, y hoy salen de `npm run dev:token`. Lo más simple es una caja donde pegarlo, guardado solo en la pestaña del navegador. No hay pantalla de login porque no existe un proveedor de identidad.
+- **Solo desarrollo.** La consola no debe existir en producción. La API ya se niega a arrancar en producción con la autenticación actual, así que queda cubierto, pero lo dejaría escrito.
+- **Importes.** La API devuelve unidades mínimas (céntimos) y la divisa. El navegador sabe formatear cada divisa con sus decimales, así que no hay que inventar nada.
+- **Fechas.** Todo se mostraría en UTC, que es el reloj de los plazos, para no confundir con la hora local.
+- **Pruebas.** Un test de que `/console` responde, y una comprobación real en el navegador contra tu base de 10M. La lógica sigue estando en la API, que ya tiene sus tests.
+
+## Decisiones que necesito
+
+1. **¿Camino A o B?**
+2. **¿Solo lectura, o también acciones?** Solo lectura es lo que pide el brief. Con acciones (presentar evidencia, registrar el resultado, añadir una nota) se vería en pantalla cómo las reglas rechazan una transición, por ejemplo el 409 de evidencia tardía. Sería más vistoso para el debate, pero duplica el trabajo. Mi recomendación es empezar por solo lectura y decidir después.
+3. **¿Dónde vive?** Propongo `src/http/console/`, como una parte más de la API. Con B sería `web/`.
+
+## Human (45)
+
+Si A es lo mas básico pero cubre, podemos verlo en alpine.js, aunque solo lo he oido para laravel, pero si cubre, y se ven la gráfica y tendencia, estados, nivel de servicio, casos y demás, adelante. implementemos, pero que qeude todo docuemtnado el porque, y tambien que si debe ser un frontend serío la opción sería react con más configuración la opcion B pero para el caso de prueba técnica tiraríamos por  la opciión A por este motivo. Adelante implementa.
+
+<details><summary>3 actions</summary>
+
+- `Bash` — Check static serving API, library versions and report schema
+- `Bash` — Read serveStatic types and install Alpine and Pico
+- `Bash` — Check Alpine's files and how serveStatic uses the path option
+
+</details>
+
+**Agent:**
+
+Dependencias instaladas y API de ficheros estáticos comprobada. Escribo la consola: una página HTML, su script y la ruta que la sirve.
+
+<details><summary>6 actions</summary>
+
+- `Bash` — Write the console page, its script and the route that serves it
+- `Bash` — Remove x-cloak and check the preview launch config
+- `Bash` — Create a local preview launch config, excluded from git
+- `preview_start`
+- `Bash` — Check the console files are served and mint a dev token
+- `Bash` — Read the dev token for the browser check
+
+</details>
+
+**Agent:**
+
+La consola ya se sirve en `/console`. Ahora la pruebo de verdad en el navegador contra tu base de 10M, con un token de desarrollo.
+
+<details><summary>6 actions</summary>
+
+- `browser_batch`
+- `browser_batch`
+- `browser_batch`
+- `browser_batch`
+- `browser_batch`
+- `browser_batch`
+
+</details>
+
+**Agent:**
+
+La cola y la tabla funcionan; el historial no aparece al pulsar un caso. Lo investigo.
+
+<details><summary>6 actions</summary>
+
+- `browser_batch`
+- `browser_batch`
+- `javascript_tool`
+- `Bash` — Scroll to the history once loaded and fix spacing
+- `browser_batch`
+- `Bash` — Add the console test and read the README structure
+
+</details>
+
+**Agent:**
+
+La consola funciona en el navegador (cola, tabla, historial y vista a una fecha) y tiene su test. Ahora la documento: README, el porqué en TRADEOFFS, NOTES y AGENTS.
+
+<details><summary>2 actions</summary>
+
+- `Bash` — Read the doc passages that mention a console or UI
+- `Bash` — Document the console and run every gate
+
+</details>
+
+**Agent:**
+
+La consola está hecha y funcionando, **sin commit**. Pasan typecheck, lint, formato y los 210 tests. La tienes abierta en el panel del navegador, en `http://localhost:3000/console`. He dejado la API arrancada ahí; si vas a lanzar tu propio `npm run dev`, avísame y la paro, porque usan el mismo puerto.
+
+## Qué muestra
+
+- **Estado del servicio:** si la API y la base de datos responden.
+- **Cola:** importe y número de casos en riesgo, vencidos y respondidos, con una barra que indica cuánto del dinero en cola corresponde a cada estado.
+- **Tabla de casos:** ordenada por dinero, con plazo y tiempo restante. Tiene filtro por estado, ventana de riesgo y "cargar más".
+- **Historial:** al pulsar un caso se ven todos sus eventos (quién, de qué estado a cuál, qué regla decidió, cuándo), con un selector para ver el caso tal como estaba en un instante.
+
+## Lo que pediste y no está: tendencia y nivel de servicio
+
+No los he construido porque la API no tiene esos datos, y no quise inventarlos:
+
+- **Tendencia.** El informe es una foto del momento, sin serie temporal. Una gráfica de casos que vencen por día o pérdidas por semana necesita antes un endpoint nuevo que agregue por fecha.
+- **Nivel de servicio.** Los objetivos se envían al proveedor de monitorización y no hay nada que leer desde la API. Es el mismo hueco que dejamos anotado en `docs/SLOS.md` al eliminar `/metrics`.
+
+La "gráfica" que sí hay son las barras de reparto del dinero por estado, que salen del resumen del informe. Si quieres tendencia o nivel de servicio, el primer paso es diseñar su endpoint; dime cuál te interesa y lo planteamos.
+
+## Cómo está hecha
+
+- **Una página y un script** en `console/`, unas 300 líneas. Usa Alpine.js para la interactividad y Pico.css para el estilo, sin CSS propio y sin paso de compilación.
+- **Servida por la propia API**, con las dos librerías desde `node_modules`: funciona sin conexión y no carga nada de terceros.
+- **Solo usa la API pública**, los mismos tres endpoints que los cURL del README. No añade endpoints ni contiene reglas de negocio.
+- **Solo en desarrollo:** no se sirve con `NODE_ENV=production`. El token se pega a mano y se guarda solo en la pestaña.
+
+## Comprobación
+
+La probé en el navegador contra tu base de 10M: cola, tabla, historial de un caso y ese mismo historial a una fecha anterior, sin errores en la consola del navegador.
+
+Apareció algo que los tests no enseñan: un caso `OPEN` listado como vencido, 8 horas después de su plazo, porque ahora mismo no hay ningún sweeper en marcha. Es el informe diciendo la verdad sobre un sweeper parado, justo el caso por el que esa alerta es de guardia.
+
+## Documentación
+
+- **README, paso 9:** cómo abrirla y qué muestra.
+- **TRADEOFFS §16:** por qué una página estática, y que para un frontend serio la opción correcta es React con un kit de componentes, cliente generado desde el OpenAPI, login real y tests. Incluye los costes de lo elegido: el script no tiene tipos ni lint, es de solo lectura y no muestra tendencia ni nivel de servicio.
+- **NOTES 2.32 y D-52:** recogen lo que pediste, lo que no construí y por qué.
+- **AGENTS y PHASES:** actualizados.
+
+## Plan de commits
+
+| # | Commit | Contenido |
+|---|---|---|
+| 1 | `feat(console): serve a one-page console over the public API` | `console/`, `src/http/console.ts`, el montaje en la API, dependencias, test, README paso 9, AGENTS |
+| 2 | `docs: record why the console is a static page` | TRADEOFFS §16, NOTES 2.32 y D-52, PHASES |
+| 3 | `docs: extend the agent transcript to the console` | Transcript regenerado |
+
+¿Apruebo este plan y hago los commits, o quieres ver antes la consola y ajustar algo?
+
+## Human (46)
+
+Cuidado estos tests estan fallando en la pipeline. 
+
+```text
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/http/stuck-queue.integration.test.ts [ test/http/stuck-queue.integration.test.ts ]
+error: duplicate key value violates unique constraint "pg_authid_rolname_index"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ ensureApiRole test/support/api.ts:105:5
+    103|   const existing = await owner.query('SELECT 1 FROM pg_roles WHERE rol…
+    104|   if (existing.rowCount === 0) {
+    105|     await owner
+       |     ^
+    106|       .query(
+    107|         `CREATE ROLE ${API_ROLE.name} LOGIN PASSWORD '${API_ROLE.passw…
+ ❯ startApi test/support/api.ts:42:3
+ ❯ test/http/stuck-queue.integration.test.ts:13:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/http/stuck-queue.integration.test.ts [ test/http/stuck-queue.integration.test.ts ]
+TypeError: Cannot read properties of undefined (reading 'drop')
+ ❯ test/http/stuck-queue.integration.test.ts:17:28
+     15|
+     16| afterAll(async () => {
+     17|   if (available) await api.drop()
+       |                            ^
+     18| })
+     19|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 28 passed (29)
+      Tests  196 passed | 12 skipped (208)
+   Start at  08:35:43
+   Duration  10.29s (tests 55%, import 38%, transform 5%, worker 2%)
+
+    Isolate  29 workers spawned · ~113ms startup each (spawn + environment, per file)
+             at least ~976ms faster with isolate: false — reuses workers across files instead of one per file
+
+
+Error: error: duplicate key value violates unique constraint "pg_authid_rolname_index"
+ ❯ node_modules/pg-pool/index.js:45:11
+ ❯ ensureApiRole test/support/api.ts:105:5
+ ❯ startApi test/support/api.ts:42:3
+ ❯ test/http/stuck-queue.integration.test.ts:13:24
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { length: 228, severity: 'ERROR', code: '23505', detail: 'Key (rolname)=(triple_api) already exists.', hint: undefined, position: undefined, internalPosition: undefined, internalQuery: undefined, where: undefined, schema: 'pg_catalog', table: 'pg_authid', dataType: undefined, constraint: 'pg_authid_rolname_index', file: 'nbtinsert.c', routine: '_bt_check_unique' }
+
+
+Error: TypeError: Cannot read properties of undefined (reading 'drop')
+ ❯ test/http/stuck-queue.integration.test.ts:17:28
+
+
+Error: Process completed with exit code 1.
+```
+
+en la console, me falta poder cerrar el caso cargado. No hay forma. ano ser que seleccionemos otro.
+
+<details><summary>8 actions</summary>
+
+- `Bash` — Read how the tests create the API role
+- `Bash` — Handle both errors PostgreSQL gives when roles race
+- `Bash` — Start a throwaway Postgres to reproduce the CI race
+- `Bash` — See how tests and CI choose the database
+- `Bash` — Reproduce the race before the fix and re-run after it
+- `Bash` — Add the close button and run ten more fresh-cluster test passes
+- `browser_batch`
+- `Bash` — Record the CI race in NOTES and run the gates
+
+</details>
+
+**Agent:**
+
+Las dos cosas están resueltas, **sin commit**: el fallo de la pipeline y el botón para cerrar el caso. Pasan typecheck, lint, formato y los 210 tests.
+
+## El fallo de la pipeline
+
+**Causa.** Cada fichero de tests de la API se ejecuta en su propia base de datos y en paralelo, pero los roles de PostgreSQL son de todo el servidor. Varios ficheros comprueban a la vez si existe `triple_api` y, si no, intentan crearlo.
+
+El código de apoyo de los tests ya contaba con esa carrera, pero solo ignoraba una de las dos formas en que PostgreSQL responde. Si las dos sesiones insertan en el mismo instante, el error es otro (una violación de unicidad en el catálogo), y ese se escapaba.
+
+**Por qué no lo viste en local.** `npm run dev:seed` ya había creado el rol en tu máquina. En CI el servidor es nuevo en cada ejecución.
+
+**Arreglo.** En `test/support/api.ts` ahora se reconocen los dos errores por su código (`42710` y `23505`), no por el texto del mensaje.
+
+**Comprobación.** Levanté un PostgreSQL desechable y borré el rol antes de cada pasada, sin tocar tu base de datos:
+
+| | Pasadas | Fallos |
+|---|---|---|
+| Antes del arreglo | 6 | 2, con el mismo error de la pipeline |
+| Después | 16 | 0 |
+
+El contenedor de prueba ya está parado y eliminado. Lo he anotado en NOTES 2.33. Es el mismo tipo de error que el 2.25: unos tests que solo se habían ejecutado contra una base ya preparada.
+
+## La consola
+
+El historial tiene ahora un botón **"Close this case"** que cierra el panel y deja la tabla como estaba. Lo comprobé en el navegador: abre el caso, lo cierra, y la tabla conserva sus 50 filas sin errores.
+
+## Plan de commits
+
+El primero es el urgente, porque `main` está en rojo en GitHub y no depende de la consola:
+
+| # | Commit | Contenido |
+|---|---|---|
+| 1 | `fix(test): survive both errors of a concurrent role creation` | `test/support/api.ts` y NOTES 2.33 |
+| 2 | `feat(console): serve a one-page console over the public API` | `console/`, `src/http/console.ts`, montaje en la API, dependencias, test, README paso 9, AGENTS |
+| 3 | `docs: record why the console is a static page` | TRADEOFFS §16, NOTES 2.32 y D-52, PHASES |
+| 4 | `docs: extend the agent transcript to the console` | Transcript regenerado |
+
+¿Hago los cuatro, o solo el primero para que puedas hacer push y poner la pipeline en verde ya?
+
+## Human (47)
+
+Si, puedes hacer estos commits.
+
+<details><summary>1 action</summary>
+
+- `Bash` — Create the fix, console and docs commits
 
 </details>
