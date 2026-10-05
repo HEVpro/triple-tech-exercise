@@ -587,7 +587,8 @@ All six phases (0–5) are complete: toolchain and gates, the schema and migrati
 live-data plan, the domain core, the case API with development auth and tenant isolation, and the
 stuck-queue report with the deadline sweeper. Phase 5 measured the report and the history on ten
 million cases (17–24 ms and 4–6 ms per request) and defined the SLOs and the on-call alerts
-([`docs/SLOS.md`](./docs/SLOS.md)). What is deliberately unfinished is listed in
+([`docs/SLOS.md`](./docs/SLOS.md)). The brief's optional console was added afterwards, as one page
+over the public API at `/console` (step 9). What is deliberately unfinished is listed in
 [`NOTES.md`](./NOTES.md) section 4.
 
 | Document | Contents |
