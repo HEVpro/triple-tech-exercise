@@ -200,7 +200,14 @@ The database enforces that `system` is used for `DEADLINE_EXPIRED` and nothing e
 
 Unversioned paths, as in the brief, because banks already consume `GET /cases/:id` (D-27). Changes
 are additive only, and the frozen contracts in `test/contract/` (case, history, stuck-queue report)
-fail the build on a removed, renamed or retyped field. The OpenAPI document generated from the code is served at `/docs`.
+fail the build on a removed, renamed or retyped field. The OpenAPI document generated from the code
+is served at `/docs`.
+
+**A major version in the path (`/v1/cases/:id`) would be the better design** for a new API: it
+gives a breaking change somewhere to go. It is not added, for continuity of service: moving the
+paths would break the banks already integrated, which is what the brief asks to avoid. If a
+breaking change is ever needed, `/v2/...` is introduced beside the current paths, which keep
+working as they are (TRADEOFFS §14b).
 
 | Method | Path | Body | Success |
 | --- | --- | --- | --- |

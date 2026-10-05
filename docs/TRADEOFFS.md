@@ -319,6 +319,24 @@ Each is reversible at low cost.
 
 ---
 
+## 14b. No version in the path, for continuity of service
+
+**Decision.** The paths stay as the brief names them: `/cases/:id`, not `/v1/cases/:id` (D-27).
+
+**Why.** A major version in the path is the better design for a new API, because a breaking change
+then has somewhere to go. But this API is not new to its consumers: the brief says banks already
+consume `GET /cases/:id` and asks to keep it working. Moving every path under `/v1` would be the
+breaking change that versioning exists to prevent.
+
+**What protects the banks instead.** Changes are additive only, and three contracts written by hand
+(case, history, report) fail the build if a published field is removed, renamed or retyped (D-41).
+
+**Cost.** There is no place for a breaking change today. When one is needed, the new shape is
+published under `/v2/...` beside the current paths, which stay as they are; serving the current
+ones under `/v1/...` as well, as an alias, would be additive and can be done at any time.
+
+---
+
 ## 15. Simplified for the exercise, to revisit for production
 
 | Area | Exercise | Production |

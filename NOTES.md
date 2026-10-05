@@ -557,6 +557,28 @@ were recorded as `DEADLINE_EXPIRED`. Correct behaviour, and append-only, but a w
 database that was not announced beforehand. The invariant check afterwards: 10 000 001 cases, 0
 mismatches.
 
+### 2.31 The last review: a version in the path, asked for and then withdrawn
+
+**What happened:** the human followed the README from start to finish as a final check; every
+command worked. Reading the URLs, they asked for the major version to be added to every path
+(`/v1/...`), which is what a new API should have.
+
+**What the AI did:** before changing anything it said that the request contradicted a recorded
+decision (D-27) and one sentence of the brief, "banks consume `GET /cases/:id`, so keep it
+working", the same sentence the AI itself had broken in 2.12 with `/v1/cases/:external_ref`. It
+proposed serving `/v1/...` as the documented base and keeping the unversioned paths as an alias.
+
+**Decision:** the human withdrew the change: the paths stay unversioned, and the reasoning is
+written down instead (TRADEOFFS §14b): versioning would be better, and it is not added for
+continuity of service. This is the rule in `AGENTS.md` working as intended: a change that
+contradicts a decision is said out loud, and the register is updated either way.
+
+**The opposite case, in the same review:** the AI had recommended removing `/metrics` for lack of
+a consumer, and the human agreed. Afterwards the human pointed out what it had been good for
+here: in an exercise no provider is connected, so an endpoint is the only way to see the numbers.
+The removal stands; the gap is recorded (`docs/SLOS.md`). The AI's recommendation was right about
+the team's tooling and missed the reviewer's situation.
+
 ---
 
 ## 3. Decision register
@@ -593,7 +615,7 @@ rejected column.
 | **D-24** (rev.) | Prettier does not touch SQL. | It never did (2.14); saying so is the fix. | Claiming Prettier formats SQL. |
 | **D-25** | `POST /cases/:id/transitions { to }` maps `to` to a domain fact; the rules decide; a mismatch is `409` naming the rule; same status is a no-op `200`. | Keeps the brief's vocabulary while `UNDER_REVIEW` keeps its meaning: evidence filed in time. | Clients setting any allowed status. |
 | **D-26** | `seq` = new `cases.version`, taken in the projection `UPDATE`; primary key `(case_id, seq)`. | Concurrency-safe via the row lock, gapless (a gap reveals tampering), and it is the history index. | `MAX(seq)+1`, a global identity, timestamps. |
-| **D-27** | Unversioned paths (`/cases/:id`), additive-only responses, lookup by `?external_ref=`. | "Banks consume `GET /cases/:id`, so keep it working" (2.12). | `/v1/cases/:external_ref`. |
+| **D-27** (confirmed) | Unversioned paths (`/cases/:id`), additive-only responses, lookup by `?external_ref=`. A major version in the path would be the better design for a new API; it is not added, for continuity of service (2.31, TRADEOFFS §14b). | "Banks consume `GET /cases/:id`, so keep it working" (2.12). Moving the paths under `/v1` is the breaking change versioning exists to prevent. | `/v1/cases/:external_ref`; moving every path under `/v1` at the end of the exercise. |
 | **D-28** | Rules evaluated **at creation** too; the report returns `at_risk`, `responded` and recently `breached` rows with `deadline_state`. | Scenario 2 becomes deterministic, and lost money stays visible. | Waiting for the sweeper; hiding breaches from the report. |
 | **D-29** | Creation idempotent on `UNIQUE (tenant_id, external_ref)`: same payload → `200` with the case, different → `409`. | The natural key already prevents duplicates; no key table needed. | An `Idempotency-Key` store. |
 | **D-30** | Event catalogue v1: `CASE_CREATED`, `EVIDENCE_FILED`, `SCHEME_OUTCOME_RECORDED`, `DEADLINE_EXPIRED`, `NOTE_ADDED`. `NOTE_ADDED` exists so the trail shows the work, not just the status, and makes a 400-event case realistic. | A closed set, enforced by `CHECK` and by the type union. | Free-form event types. |
