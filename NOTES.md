@@ -627,10 +627,12 @@ All six phases are complete. Recorded so the gaps are explicit rather than disco
 reviewer:
 
 - **The Sentry side is not configured or tried.** The code sends the signals (checked against a
-  local stand-in); the monitors in `docs/SLOS.md` have to be created in the team's Sentry, and their
-  thresholds (99.9%, 5 and 15 minutes) are proposals to agree with the operation.
-- **No scrape endpoint.** `/metrics` was removed for lack of a consumer (D-51); whether the
-  platform needs one is to be settled with the company's infrastructure.
+  local stand-in); the monitors in `docs/SLOS.md` have to be created in the team's Sentry, with
+  the agreed thresholds (99.9%, 5 and 15 minutes).
+- **The objectives cannot be read through the API.** Every signal is pushed to the provider, and
+  in this exercise none is connected. `/metrics` did that and was removed for lack of a consumer
+  (D-51); the human pointed out afterwards that this is exactly why it was useful here. Not needed
+  now and not built; recorded in `docs/SLOS.md` as a known gap, with where it would go.
 - **No scheduled audit of invariant 3** (a case equals its log). Run by hand only.
 - **Retention of `case_events` is undecided** (D-49): the log only grows. The direction is written
   down (hot in PostgreSQL, cold in Parquet on S3); nothing is built.

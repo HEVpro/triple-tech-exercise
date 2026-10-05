@@ -40,14 +40,18 @@ minute, and an engineer can fix it.
 | 4 | `GET /reports/stuck-queue` latency | p99 under 100 ms | Ticket |
 
 The 200 ms and 100 ms come from the brief's review scenarios; measured today at 4–6 ms and
-17–24 ms on ten million cases ([`PERFORMANCE.md`](./PERFORMANCE.md)). **The 99.9% and the 5 and 15
-minutes are engineering proposals, not business requirements**: they are a starting point to agree
-with the people who own the operation. Latency is a ticket because a slow report loses no money
-overnight.
+17–24 ms on ten million cases ([`PERFORMANCE.md`](./PERFORMANCE.md)). The 99.9% and the 5 and 15
+minutes are the thresholds agreed for this service. Latency is a ticket because a slow report loses
+no money overnight.
 
 ## How each one is watched
 
 Set `SENTRY_DSN` and both processes report; without it nothing is initialised and nothing is sent.
+
+**In this exercise no provider is connected**, so nothing is watched live. What can be observed
+through the API itself today is `GET /healthz`, `GET /readyz` (a real database round trip) and
+`GET /reports/stuck-queue`; each request's route, status and duration are in the log. See
+[the gap below](#known-gap-nothing-to-read-through-the-api).
 
 | What | Signal | Where it comes from |
 | --- | --- | --- |
@@ -105,6 +109,14 @@ The last one covers what the others cannot: an API that is down sends no events 
 - Sentry's alert routing (who is on call, PagerDuty or Slack) is the team's existing setup.
 - `SENTRY_TRACES_SAMPLE_RATE` defaults to 1 (every request traced). At real volume it is lowered;
   percentiles stay valid on a sample, error events are not sampled.
-- There is no scrape endpoint. The Prometheus `/metrics` endpoint from phase 0 had no consumer and
-  was removed (D-51); whether the platform needs one is a question for the company's
-  infrastructure.
+
+## Known gap: nothing to read through the API
+
+Every signal here is pushed to the provider. With no provider connected, as when this exercise is
+reviewed, the objectives cannot be checked from outside: there is no endpoint that answers "how
+many writes failed" or "how far behind is the sweeper".
+
+Phase 0 had one, `GET /metrics` in Prometheus format, and it was removed in phase 5 because nothing
+read it (D-51). That removal traded this away. It is not needed now and is not built; if it is
+wanted, it belongs in `src/monitoring` as one more function next to the ones that push, serving
+the same four indicators, so the objectives can be read without any provider.
