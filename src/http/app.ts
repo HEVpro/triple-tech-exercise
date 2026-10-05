@@ -13,7 +13,6 @@ import { SERVICE_NAME, VERSION } from '../version.js'
 import { type AuthConfig, authenticate } from './auth.js'
 import { caseRoutes } from './cases/routes.js'
 import { errorBody, handleError, validationHook } from './errors.js'
-import { httpRequestDuration, metricsContentType, renderMetrics } from './metrics.js'
 import { reportRoutes } from './reports/routes.js'
 
 const healthSchema = z.object({
@@ -56,13 +55,16 @@ export function createApp(deps: AppDependencies): OpenAPIHono<AppEnv> {
   app.use('*', async (c, next) => {
     const startedAt = performance.now()
     await next()
-    const labels = {
-      method: c.req.method,
-      route: routePath(c as Context) || 'unmatched',
-      status_code: String(c.res.status),
-    }
-    httpRequestDuration.observe(labels, (performance.now() - startedAt) / 1000)
-    logger().debug({ ...labels, requestId: c.get('requestId') }, 'request completed')
+    logger().debug(
+      {
+        durationMs: Math.round(performance.now() - startedAt),
+        method: c.req.method,
+        requestId: c.get('requestId'),
+        route: routePath(c as Context) || 'unmatched',
+        status: c.res.status,
+      },
+      'request completed',
+    )
   })
 
   const healthRoute = createRoute({
@@ -106,11 +108,6 @@ export function createApp(deps: AppDependencies): OpenAPIHono<AppEnv> {
       logger().error({ err: error }, 'readiness check failed')
       return c.json(errorBody('service_unavailable', 'database unavailable'), 503)
     }
-  })
-
-  app.get('/metrics', async (c) => {
-    c.header('content-type', metricsContentType())
-    return c.text(await renderMetrics())
   })
 
   app.use('/cases', authenticate(deps.auth))

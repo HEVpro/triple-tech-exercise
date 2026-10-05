@@ -279,7 +279,6 @@ OpenAPI definition, so the contract cannot drift from the implementation.
 | --- | --- | --- | --- |
 | `GET` | `/healthz` | Liveness. Does not touch the database. | done |
 | `GET` | `/readyz` | Readiness, including a real database round trip. | done |
-| `GET` | `/metrics` | Prometheus metrics. | done |
 | `GET` | `/docs` | Interactive API reference. | done |
 | `GET` | `/docs/openapi.json` | Raw OpenAPI 3.1 document. | done |
 | `POST` | `/cases` | Create a case, idempotent on `external_ref` | done |
@@ -301,7 +300,6 @@ The full contract is in [`docs/DOMAIN.md`](./docs/DOMAIN.md#http-contract).
 ```bash
 curl -s http://localhost:3000/healthz | jq
 curl -s http://localhost:3000/readyz | jq
-curl -s http://localhost:3000/metrics | grep http_request_duration
 curl -s http://localhost:3000/docs/openapi.json | jq '.paths | keys'
 ```
 

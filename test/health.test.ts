@@ -40,15 +40,6 @@ describe('health endpoints', () => {
     expect(document.components.securitySchemes).toHaveProperty('bearerAuth')
   })
 
-  it('exposes prometheus metrics', async () => {
-    await (await app.request('/healthz')).text()
-
-    const metrics = await app.request('/metrics')
-
-    expect(metrics.status).toBe(200)
-    expect(await metrics.text()).toContain('http_request_duration_seconds')
-  })
-
   it('reports not ready, in the error envelope, when the database does not answer', async () => {
     const failing = createApp({
       auth: AUTH,

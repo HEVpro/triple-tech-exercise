@@ -24,10 +24,11 @@ Current status: **phases 0 to 4 complete.**
 ## Phase 0: Foundation — done
 
 TypeScript, Hono, Zod, Pino, Vitest, PostgreSQL 17 in Docker. ESLint `strictTypeChecked` with layer
-boundaries, Prettier, commitlint, husky hooks, `/healthz`, `/readyz`, `/metrics`, `/docs`.
+boundaries, Prettier, commitlint, husky hooks, `/healthz`, `/readyz`, `/docs`.
 
 Trimmed afterwards: the homemade guards, the second SQL linter and `db-check` were removed;
-secret scanning moved to gitleaks (D-32).
+secret scanning moved to gitleaks (D-32); the Prometheus `/metrics` endpoint had no consumer and
+was removed in phase 5 (D-51).
 
 ---
 
