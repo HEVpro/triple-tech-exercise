@@ -579,6 +579,26 @@ here: in an exercise no provider is connected, so an endpoint is the only way to
 The removal stands; the gap is recorded (`docs/SLOS.md`). The AI's recommendation was right about
 the team's tooling and missed the reviewer's situation.
 
+### 2.33 Red CI again: a race the AI had handled for only one of its two errors
+
+**What happened:** after the phase 5 push the pipeline failed in one test file with `duplicate key
+value violates unique constraint "pg_authid_rolname_index"`. The human pasted the log.
+
+**Cause:** every API test file runs in its own database, in parallel, but roles belong to the
+whole server. Each file checks whether `triple_api` exists and creates it if not, so several can
+try at once. The helper written in phase 3 expected that and ignored the error "role already
+exists". PostgreSQL has a second answer for the same situation: when two sessions insert the role
+at the same instant, the loser gets a unique violation on the catalogue instead, with a different
+message. The helper matched on the message text, so that one escaped. It never showed locally
+because `npm run dev:seed` had already created the role there; in CI the server is new every run.
+
+**Proof, not a guess:** a throwaway PostgreSQL with the role dropped before each run. Before the
+fix the suite failed 2 runs out of 6; after it, 0 out of 16. The helper now recognises both by
+their SQLSTATE codes (`42710`, `23505`), not by wording.
+
+**The lesson is 2.25 again:** a test suite that only ever ran against a prepared database was not
+tested against the empty one CI uses.
+
 ---
 
 ## 3. Decision register

@@ -1,6 +1,6 @@
 import { drizzle } from 'drizzle-orm/node-postgres'
 import { sign } from 'hono/jwt'
-import { Pool } from 'pg'
+import { DatabaseError, Pool } from 'pg'
 
 import type { CaseStore } from '../../src/application/cases/index.js'
 
@@ -98,17 +98,22 @@ export async function startApi(): Promise<TestApi> {
   }
 }
 
-// Roles are cluster-wide; the first suite to run creates it.
+// Roles are cluster-wide and the suites run in parallel, each in its own database: several can
+// find the role missing and try to create it at once. PostgreSQL then fails the losers in one of
+// two ways, depending on how far the winner got: "role already exists" (42710) or, when both
+// insert into the catalogue at the same instant, a unique violation on it (23505). Both mean the
+// role is there.
+const ROLE_ALREADY_CREATED = new Set(['23505', '42710'])
+
 async function ensureApiRole(owner: Pool): Promise<void> {
   const existing = await owner.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [API_ROLE.name])
-  if (existing.rowCount === 0) {
-    await owner
-      .query(
-        `CREATE ROLE ${API_ROLE.name} LOGIN PASSWORD '${API_ROLE.password}' IN ROLE triple_app`,
-      )
-      .catch((error: unknown) => {
-        // Another suite running in parallel created it first.
-        if (!(error instanceof Error && error.message.includes('already exists'))) throw error
-      })
-  }
+  if (existing.rowCount !== 0) return
+
+  await owner
+    .query(`CREATE ROLE ${API_ROLE.name} LOGIN PASSWORD '${API_ROLE.password}' IN ROLE triple_app`)
+    .catch((error: unknown) => {
+      if (!(error instanceof DatabaseError && ROLE_ALREADY_CREATED.has(error.code ?? ''))) {
+        throw error
+      }
+    })
 }
