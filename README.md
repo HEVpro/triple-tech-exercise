@@ -48,10 +48,10 @@ npm run dev:seed
 - `dev:seed` creates **`triple_api`**, the restricted role the API connects as (it can read and
   append, never update or delete the audit trail), and two demo banks:
 
-  | Tenant | `--tenant` | Base currency |
-  | --- | --- | --- |
-  | Acme Issuer | `acme` | EUR |
-  | Globex Bank | `globex` | USD |
+  | Tenant | `--tenant` | Base currency | Rule order |
+  | --- | --- | --- | --- |
+  | Acme Issuer | `acme` | EUR | default |
+  | Globex Bank | `globex` | USD | scheme outcome before the deadline (step 10) |
 
 Both commands are idempotent: running them again changes nothing.
 
@@ -248,6 +248,48 @@ holds no logic. It is a development tool: it is not served when `NODE_ENV=produc
 built this way, and what a real frontend would need instead, is in
 [`docs/TRADEOFFS.md`](./docs/TRADEOFFS.md) §16.
 
+### 10. Rule order per bank (optional)
+
+The terminal rules are evaluated in an order each bank can configure (`tenant_rule_config`). Acme
+uses the default; `dev:seed` gives Globex one row that puts the scheme's outcome before the
+deadline. The order changes one decision: **no evidence, the deadline has passed, and the scheme's
+outcome arrives before the sweeper has recorded the loss.**
+
+The API cannot create that situation directly (a case created late is `LOST` at once), so the
+example moves a deadline into the past by hand, as time would:
+
+```bash
+for BANK in acme:EUR globex:USD; do
+  TOKEN=$(npm run -s dev:token -- --tenant ${BANK%%:*})
+  CASE_ID=$(curl -s -X POST http://localhost:3000/cases \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"external_ref\":\"RULES-$(date +%s)\",\"amount_cents\":50000,\"currency\":\"${BANK##*:}\",\"scheme\":\"VISA\",\"reason_code\":\"10.4\",\"presentment_date\":\"$(node -e "console.log(new Date(Date.now()-10*864e5).toISOString().slice(0,10))")\"}" | jq -r .id)
+  docker exec triple-postgres psql -U triple -d triple -qc \
+    "UPDATE cases SET deadline_at = now() - interval '1 hour' WHERE id = '$CASE_ID'"
+  curl -s -X POST http://localhost:3000/cases/$CASE_ID/transitions \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d "{\"to\":\"WON\",\"reason\":\"scheme ruled for the issuer\",\"scheme_decision_ref\":\"VROL-42\",\"scheme_decided_on\":\"$(date -u +%F)\"}" \
+    | jq -c '{bank: "'${BANK%%:*}'", error: .error.code, decided_by: (.error.details.decided_by.rule_key // .case.decided_by_rule), status: .case.status}'
+done
+```
+
+```json
+{"bank":"acme","error":"rule_conflict","decided_by":"deadline_passed","status":null}
+{"bank":"globex","error":null,"decided_by":"scheme_outcome","status":"WON"}
+```
+
+Acme refuses the outcome with a `409`: the deadline rule comes first and the case is lost. Globex
+records what the scheme decided. To configure a bank, insert its rows as the database owner:
+
+```sql
+INSERT INTO tenant_rule_config (tenant_id, rule_key, priority)
+VALUES ('22222222-2222-4222-8222-222222222222', 'scheme_outcome', 1);
+```
+
+Rules without a row keep their default position after the configured ones. The order never
+switches a rule off, and never changes a case already decided: rules run when something is
+written, and the decision is stored (`test/http/rule-order.integration.test.ts`).
+
 ### Starting over
 
 ```bash
@@ -274,7 +316,7 @@ npm run db:reset && npm run db:migrate && npm run dev:seed
 | `npm run db:generate` | Generate a migration from a change to `src/infrastructure/db/schema` (drizzle-kit) |
 | `npm run db:generate:custom -- --name <name>` | Empty migration for what drizzle-kit cannot express (triggers, grants, `CONCURRENTLY`, reference data) |
 | `npm run db:schema:check` | Fail if the TypeScript schema changed without a migration |
-| `npm run dev:seed` | Create the API role `triple_api` and the two demo tenants (idempotent) |
+| `npm run dev:seed` | Create the API role `triple_api`, the two demo tenants and Globex's rule order (idempotent) |
 | `npm run dev:token` | Print a development bearer token (`--tenant`, `--actor`, `--sub`, `--ttl`) |
 | `npm run worker` / `npm run sweep` | Deadline sweeper: a loop, or one pass and exit |
 | `npm run start:worker` | The compiled sweeper loop (`dist/worker/main.js`) |

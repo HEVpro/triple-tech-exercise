@@ -621,6 +621,30 @@ their SQLSTATE codes (`42710`, `23505`), not by wording.
 **The lesson is 2.25 again:** a test suite that only ever ran against a prepared database was not
 tested against the empty one CI uses.
 
+### 2.34 A configurable feature that had never been seen to work
+
+**What happened:** in the last review the human looked at the database and found
+`tenant_rule_config` empty: "a table with no use". Their rule: either it has business meaning, or
+a migration removes it.
+
+**What was true:** the table was not unused (every write reads it to order the rules) and it is
+the brief's "configurable, ordered rules". But the human's instinct was right about the gap behind
+it: no row had ever existed and no test showed a row changing a decision. The only tests were of
+the function that sorts the rules. Since phase 2 the documents had claimed a configurable feature
+that nobody had watched work from the database to the response. NOTES section 4 even listed "no
+rows and no API" as if that were only an omission.
+
+**What was done:** the development seed gives Globex a real configuration (scheme outcome before
+the deadline), and an integration test puts the same request to both banks: Acme refuses it with
+a 409 decided by `deadline_passed`, Globex records `WON` decided by `scheme_outcome`. Two more
+tests fix what the order must not do: switch the deadline off, or change a case already decided.
+All of it passed the first time, and the same comparison was repeated by hand through the running
+API. The feature worked; what was missing was the evidence.
+
+**What it also made explicit:** how narrow the feature is. The order matters only while a case is
+past its deadline and not yet swept, about a minute in production (TRADEOFFS §12). That is now
+written where the feature is described, instead of being implied.
+
 ---
 
 ## 3. Decision register
@@ -638,7 +662,7 @@ rejected column.
 | **D-5** (rev.) | Static `fx_rates(currency, base_currency, rate, rate_date)`; `amount_base_minor`, `fx_rate`, `fx_rate_date` snapshotted at creation. | The report must order by money across currencies, reproducibly. | Live FX at report time. Production would source rates from scheme settlement or the bank's provisioning rates (TRADEOFFS §15). |
 | **D-6** (rev.) | `deadline_at` = end of day `presentment_date + window_days` in the **window's** zone (`deadline_tz`, default `UTC`). Half-open `instant < deadline_at`. | The obligation is issuer ↔ scheme, so the scheme's calendar anchors it; UTC removes DST; half-open gives a boundary one answer. UTC is an unverified assumption per scheme. | The tenant's time zone (2.15); `timestamptz + interval`; a closed interval. |
 | **D-7** | `actor_type IN ('human','agent','system')`, `actor_id` always set; from the token (user → `human`, machine client → `agent`); `system` only for `DEADLINE_EXPIRED`, enforced by a `CHECK`. | An automatic loss needs an honest actor; the API must not let a client claim to be the system. | The brief's two-value enum. |
-| **D-8** (rev.) | Rule **predicates in TypeScript**; `tenant_rule_config` holds the **order** (`priority`) only, which is what the brief asks for. No admin API; changes by migration. | Evaluated text in a table is an attack surface and untestable; the order is plain data. With corrected predicates, order only decides rule 1 vs rule 3. | Predicates as SQL or a DSL; everything hardcoded; a per-rule on/off switch, which the AI invented and the human removed (2.23). |
+| **D-8** (rev.) | Rule **predicates in TypeScript**; `tenant_rule_config` holds the **order** (`priority`) only, which is what the brief asks for. No admin API; rows are inserted by the database owner. The development seed configures Globex (scheme outcome first) and an integration test compares it with Acme (2.34). | Evaluated text in a table is an attack surface and untestable; the order is plain data. With corrected predicates, order only decides rule 1 vs rule 3. | Predicates as SQL or a DSL; everything hardcoded; a per-rule on/off switch, which the AI invented and the human removed (2.23). |
 | **D-9** (rev.) | Periodic sweeper over **`OPEN` only**, `FOR UPDATE SKIP LOCKED`, batch, idempotent, `system` actor. | `UNDER_REVIEW` filed evidence in time and cannot lose to the deadline (2.10). | Sweeping `UNDER_REVIEW` too; lazy evaluation on read; `pg_cron`. |
 | **D-10** (rev.) | `case_events` append-only by **grants** (`triple_app`: `SELECT`, `INSERT`), a **trigger** rejecting `UPDATE`/`DELETE`/`TRUNCATE` for every role, and **`ON DELETE RESTRICT`** to `cases`. `metadata JSONB` validated per type, ≤ 16 KB, no personal data. A future "delete" is a `CASE_VOIDED` event. | Audit that a single SQL statement can erase is not audit. | `ON DELETE CASCADE` (deleting a case erased its trail); convention only. |
 | **D-11** (rev.) | **Rules run on write only.** Events store `to_status`, `rule_key`, `ruleset_version`. History folds events with `recorded_at <= as_of` by `seq`, never evaluating a rule. 50 000-event cap with `truncated`. | The past must not depend on today's code or config (2.11). | Re-evaluating rules on read with `clock = as_of`; with `now()` (2.8). |
@@ -714,4 +738,6 @@ reviewer:
 - **The FX table is a placeholder** for the exercise (TRADEOFFS §15).
 - **Auth is development-only.** Tokens are minted locally with a shared secret; the server refuses
   to start in production until an OIDC mode exists.
-- **`tenant_rule_config` has no rows and no API.** Every tenant uses the default rule order.
+- **Rule order has no API.** A bank's order is configured with SQL by the database owner; only
+  the development tenant Globex has one. Its effect is confined to cases past their deadline and
+  not yet swept (TRADEOFFS §12).

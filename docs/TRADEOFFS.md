@@ -250,8 +250,12 @@ API; changes by migration.
 test. The order is plain data. Switching rules off was considered and removed: no rule has a
 valid reason to be off (NOTES 2.23).
 
-**Honest cost.** With the corrected predicates, order matters only between rule 1 and rule 3. The
-configurability the brief asks for exists, but its practical reach is small.
+**Honest cost.** With the corrected predicates, order matters only between rule 1 and rule 3, and
+only in one situation: no evidence, the deadline passed, and the scheme's outcome arriving before
+the sweeper has recorded the loss, a window of about a minute when the sweeper runs. The
+configurability the brief asks for exists and is proven end to end (the development seed gives
+Globex a different order and an integration test compares it with Acme), but its practical reach
+is small. Reading the order costs one primary-key query on every write.
 
 ---
 

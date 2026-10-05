@@ -70,7 +70,10 @@ always shadow rule 3. Both defects are fixed by the predicates below (NOTES 2.10
   win. In practice the case is already `LOST` by then and the outcome is rejected as a transition
   out of a terminal state.
 - Predicates live in code (`src/domain`). The order per tenant lives in
-  `tenant_rule_config` (D-8). An empty config means the default order above.
+  `tenant_rule_config` (D-8). An empty config means the default order above. A tenant that puts
+  rule 3 first changes exactly one outcome: with no evidence and the deadline passed, a scheme
+  outcome that arrives before the sweeper has recorded the loss is recorded instead of refused.
+  The development seed configures Globex that way, and an integration test compares it with Acme.
 - **Rules run on write only**: when a case is created, when a transition is requested, and when the
   sweeper finds an expired deadline. The decision is stored on the event as `to_status`, `rule_key`
   and `ruleset_version`. Reading history never re-evaluates a rule (D-11).
@@ -159,7 +162,9 @@ without gaps, and a gap would reveal a deleted event.
 ### `tenant_rule_config`
 
 `tenant_id`, `rule_key`, `priority`. The order as data, predicates in code. No rule can be switched
-off: every rule has a business meaning the system must honour (NOTES 2.23).
+off: every rule has a business meaning the system must honour (NOTES 2.23). Rules without a row
+keep their default position after the configured ones. Read on every write; rows are inserted by
+the database owner (there is no API for it).
 
 ### Event catalogue (v1)
 

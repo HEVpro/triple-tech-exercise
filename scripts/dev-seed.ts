@@ -3,8 +3,8 @@ import { drizzle } from 'drizzle-orm/node-postgres'
 import { Pool } from 'pg'
 import { z } from 'zod'
 
-import { tenants } from '../src/infrastructure/db/schema/index.js'
-import { DEV_TENANTS } from './dev-tenants.js'
+import { tenantRuleConfig, tenants } from '../src/infrastructure/db/schema/index.js'
+import { DEV_RULE_ORDER, DEV_TENANTS } from './dev-tenants.js'
 
 // Development data. Never run against production: it creates a login role with the password
 // from DATABASE_URL and two demo tenants. Idempotent: running it twice changes nothing.
@@ -12,6 +12,7 @@ import { DEV_TENANTS } from './dev-tenants.js'
 // 1. The API's login role, taken from DATABASE_URL (user and password), as a member of
 //    triple_app. Roles are cluster-wide, so this needs the owner connection.
 // 2. The two demo tenants.
+// 3. Globex's rule order, so the per-tenant configuration can be seen working.
 
 const out = process.stdout.write.bind(process.stdout)
 const fail = process.stderr.write.bind(process.stderr)
@@ -58,6 +59,15 @@ try {
     .returning({ id: tenants.id })
   out(
     `tenants: ${inserted.length} created, ${Object.keys(DEV_TENANTS).length - inserted.length} already present\n`,
+  )
+
+  const ordered = await db
+    .insert(tenantRuleConfig)
+    .values([...DEV_RULE_ORDER])
+    .onConflictDoNothing()
+    .returning({ rule_key: tenantRuleConfig.rule_key })
+  out(
+    `rule order: globex evaluates scheme_outcome first (${ordered.length === 0 ? 'already set' : 'set'})\n`,
   )
 } catch (error) {
   fail(`dev-seed failed: ${error instanceof Error ? error.message : String(error)}\n`)
