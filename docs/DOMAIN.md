@@ -199,8 +199,8 @@ The database enforces that `system` is used for `DEADLINE_EXPIRED` and nothing e
 ## HTTP contract
 
 Unversioned paths, as in the brief, because banks already consume `GET /cases/:id` (D-27). Changes
-are additive only, and `test/contract/case-v1.ts` fails the build on a removed, renamed or retyped
-field. The OpenAPI document generated from the code is served at `/docs`.
+are additive only, and the frozen contracts in `test/contract/` (case, history, stuck-queue report)
+fail the build on a removed, renamed or retyped field. The OpenAPI document generated from the code is served at `/docs`.
 
 | Method | Path | Body | Success |
 | --- | --- | --- | --- |

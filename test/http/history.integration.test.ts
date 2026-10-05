@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { satisfiesCaseV1 } from '../contract/case-v1.js'
+import { satisfiesHistoryV1 } from '../contract/history-v1.js'
 import { startApi, type TestApi } from '../support/api.js'
 import { databaseAvailable } from '../support/temp-database.js'
 
@@ -46,7 +46,7 @@ describe.skipIf(!available)('GET /cases/:id/history', () => {
     const history = body as unknown as HistoryBody
 
     expect(status).toBe(200)
-    expect(satisfiesCaseV1(history.state)).toBe(true)
+    expect(satisfiesHistoryV1(body)).toBe(true)
     expect(history.state).toMatchObject({ status: 'UNDER_REVIEW', version: 2 })
     expect(history.decided_by).toMatchObject({ rule_key: 'evidence_filed', seq: 2 })
     expect(history.events.map((e) => [e.seq, e.type])).toEqual([
@@ -81,6 +81,7 @@ describe.skipIf(!available)('GET /cases/:id/history', () => {
 
     expect(status).toBe(200)
     expect(body).toMatchObject({ decided_by: null, events: [], state: null })
+    expect(satisfiesHistoryV1(body)).toBe(true)
   })
 
   it('can read in a read-only snapshot, as multi-query reads do', async () => {
