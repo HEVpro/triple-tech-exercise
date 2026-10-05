@@ -9,9 +9,9 @@ version of that: what was asked, what came back, and what had to be corrected by
 **The transcript itself is in [`docs/transcript.md`](./docs/transcript.md)**: every prompt and every
 answer of the session, in order, with one line per action the agent took.
 It was exported from the Claude Code session and converted to Markdown; tool outputs and the
-agent's internal reasoning are left out, which is what makes 7.9 MB of raw log readable in about
-4 000 lines. Section 2 below is the index into it: each failure is told there, and can be found in
-the transcript at the point where the human caught it. The conversation is in Spanish, as it
+agent's internal reasoning are left out, which is what makes megabytes of raw log readable in
+under 5 000 lines. Section 2 below is the index into it: each failure is told there, and can be
+found in the transcript at the point where the human caught it. The conversation is in Spanish, as it
 happened.
 
 ---
