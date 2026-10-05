@@ -75,6 +75,8 @@ export GLOBEX=$(npm run -s dev:token -- --tenant globex)
 ```
 
 Options: `--tenant acme|globex`, `--actor human|agent`, `--sub <id>`, `--ttl <minutes>` (default 60).
+Remember to change the variable name exported as parameter in the following curls.
+E.g.: if you export GLOBEX, you should change TOKEN to GLOBEX in the following curls.
 
 ### 5. Call it
 
