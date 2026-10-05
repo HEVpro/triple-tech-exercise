@@ -4739,3 +4739,155 @@ Contrato del historial hecho. Actualizo la documentación con el módulo neutro,
 - `Bash` — Commit the SLO documentation
 
 </details>
+
+**Agent:**
+
+Documentación hecha. Queda regenerar el transcript con la sesión completa y verificar cada commit por separado.
+
+<details><summary>5 actions</summary>
+
+- `export_transcript`
+- `Bash` — Regenerate the transcript and run the privacy checks
+- `Bash` — Commit the regenerated transcript
+- `Bash` — Verify every unpushed commit with the gates
+- `Bash` — Update memory note and confirm final state
+
+</details>
+
+**Agent:**
+
+La fase 5 está cerrada: **9 commits listos y sin push**, con el árbol de trabajo limpio. Cada commit se verificó por separado (instalación limpia, typecheck, lint, formato y tests) y todos pasan; el último queda con 208 tests.
+
+## Commits pendientes de tu push
+
+| Commit | Qué hace |
+|---|---|
+| `5d855fe docs: add the agent transcript and link it from NOTES` | El transcript inicial |
+| `589af71 feat(db): drop the report indexes the queue indexes replaced` | Elimina los dos índices duplicados |
+| `764bb5f docs(perf): measure the report and history at 10M cases` | Mediciones con 10M y `EXPLAIN` literal |
+| `8f75f28 chore: remove the unused Prometheus endpoint` | Quita `/metrics`, su dependencia y su test |
+| `bd962e7 feat(monitoring): report failed requests and request traces` | Monitorización de la API |
+| `e9cb910 feat(monitoring): watch the sweeper's schedule and lag` | Monitorización del sweeper |
+| `254c1d7 test(contract): freeze the history response` | Contrato congelado del historial |
+| `960e86f docs: define the SLOs and the on-call alerts` | `docs/SLOS.md` y cierre de la fase |
+| `279f4ec docs: extend the agent transcript to the end of phase 5` | Transcript con la sesión entera |
+
+El contrato del historial va antes que la documentación de SLOs, al revés de lo que te propuse, para no partir ficheros compartidos entre los dos commits.
+
+## Cómo quedó la monitorización
+
+- **Un solo módulo, `src/monitoring`.** Es el único sitio que nombra a Sentry. El resto del código llama a funciones con nombres neutros: `trackErrors`, `watchSchedule`, `recordGauge`, `startMonitoring` y `stopMonitoring`.
+- **Regla de ESLint.** Importar `@sentry/*` fuera de esa carpeta es un error de lint; comprobé que salta.
+- **Qué es un fallo lo decide la API, no el proveedor.** `trackErrors` recibe esa definición como argumento, y la API le pasa "lo que respondo con 500".
+- **Sin `SENTRY_DSN` no se envía nada.**
+
+Tras la reorganización volví a comprobar la parte del sweeper contra el servidor local que hace de Sentry, esta vez sin tocar tu base de datos. La parte de la API quedó cubierta por su test, que ejecuta Sentry de verdad.
+
+## Documentación
+
+- **[docs/SLOS.md](docs/SLOS.md):** habla de alertas de guardia; "3am" solo aparece al citar la pregunta literal del brief.
+- **NOTES 2.30:** recoge los dos errores míos que corregiste: diseñar para Prometheus sin preguntar qué usáis, y acoplar el código al proveedor.
+- **D-50 y D-51:** las decisiones de monitorización y de eliminar `/metrics`.
+
+## Pendiente fuera del código
+
+- **Crear los monitores en vuestro Sentry.** `docs/SLOS.md` trae la tabla. No está probado contra una cuenta real.
+- **Acordar los umbrales** (99,9%, 5 y 15 minutos) con quien lleve la operación.
+- **Decidir con la empresa** si la plataforma necesita un endpoint de métricas para extracción.
+
+Si la sesión sigue con más trabajo antes de entregar, habrá que regenerar el transcript una última vez.
+
+## Human (41)
+
+Vale, aquí está el problema. Por esto estaba /metrics porque ahora sentry no va a llamar porque es una prueba técnica, por eso ha de haber alguna manera de monitorizarlo por la api, aunque ahora no es necesario, y con marcarlo en SLOs es suficiente. Los umbrales ya los hesmo acordado y son esos y deberían estar en lo SLOs y aquí acabaría. Necesito un repaso de que todo el brief, la parte de backend está cubierta. Y saber si puedo hacer ya push con la fase 5.
+
+<details><summary>3 actions</summary>
+
+- `Bash` — Find where thresholds and the scrape endpoint are described
+- `Bash` — Read the passages to change
+- `Bash` — Record agreed thresholds and the API observability gap
+
+</details>
+
+**Agent:**
+
+He dejado las dos cosas anotadas, **sin commit**: tres ficheros de documentación modificados.
+
+- **Umbrales:** `docs/SLOS.md` ya los da como acordados (99,9%, 5 y 15 minutos), sin el texto de "propuestas a validar".
+- **Monitorizar por la API:** tenías razón, y lo he dejado dicho así. `docs/SLOS.md` tiene una sección nueva, "Known gap: nothing to read through the API":
+  - Todas las señales se envían al proveedor, y en esta prueba no hay ninguno conectado, así que los objetivos no se pueden comprobar desde fuera.
+  - `/metrics` servía justo para eso, y al eliminarlo se perdió.
+  - No se construye ahora. Si se quiere, iría en `src/monitoring` como una función más.
+  - También dice qué se puede observar hoy por la API: `/healthz`, `/readyz`, el informe, y la duración de cada petición en el log.
+  
+  NOTES §4 recoge lo mismo, e indica que fuiste tú quien lo señaló después de que yo recomendara eliminarlo.
+
+## Repaso del brief, parte backend
+
+| Lo que pide | Estado |
+|---|---|
+| Crear y consultar un caso | Hecho: `POST /cases` (idempotente por `external_ref`), `GET /cases/:id`, `GET /cases?external_ref=` |
+| Transición de estado con auditoría | Hecho: `POST /cases/:id/transitions`; cada cambio escribe un evento en la misma transacción |
+| Historial a una fecha | Hecho: `GET /cases/:id/history?as_of=` |
+| Informe de cola atascada | Hecho: `GET /reports/stuck-queue`, ventana de riesgo de 7 días por defecto |
+| Migraciones contra datos reales de 60+ tenants | Hecho: 19 migraciones y `docs/MIGRATION_PLAN.md` |
+| Regla 1, deadline por esquema | Hecho: ventanas como datos (Visa 45, Mastercard 45, OTHER 30) |
+| Regla 2, eventos con actor, origen, destino, fecha y motivo | Hecho: log append-only, protegido en la base de datos |
+| `GET /cases/:id` no se rompe | Hecho: rutas sin versión, `amount_cents` conservado, tres contratos congelados |
+| Reglas terminales configurables y ordenadas | Hecho, con el orden por tenant como dato |
+| Postgres | Hecho |
+| Repo desde commit vacío, historial intacto | Hecho |
+| README: cómo ejecutar, cURL, plan de migración | Hecho |
+| NOTES: uso de IA, transcript, prompts fallidos | Hecho: 30 fallos contados y el transcript enlazado |
+| Escenario 1: Visa a 40 días, en riesgo | Cubierto por test |
+| Escenario 2: Mastercard a 50 días, vencido | Cubierto por test |
+| Escenario 3: 400 eventos en menos de 200 ms | 4–6 ms por HTTP, medido con 27,9M eventos |
+| Escenario 4: 10M filas en menos de 100 ms, con `EXPLAIN` | 17–24 ms por HTTP, con el `EXPLAIN` literal en `docs/PERFORMANCE.md` |
+| Bonus: SLOs y alertas | Hecho: `docs/SLOS.md` |
+
+**Tres desviaciones del brief, todas documentadas en TRADEOFFS §14.** Conviene tenerlas presentes para el debate:
+1. **La regla 1 no hace perder un caso que presentó evidencia a tiempo.** Leída literalmente, lo haría.
+2. **El informe ordena por importe en la moneda base del banco**, no por `amount_cents` en bruto, para no mezclar divisas.
+3. **El informe lista por defecto lo accionable** (en riesgo y vencidos). Los `UNDER_REVIEW` van en el resumen y se piden con `?state=`.
+
+Fuera de alcance, y dicho así en el repo: frontend (opcional en el brief), auth real con OIDC, y la configuración en Sentry.
+
+## ¿Puedes hacer push?
+
+**Sí.** Los 9 commits están verificados uno a uno y no dependen de este último cambio. Antes del push te recomiendo incluir un commit más con lo de hoy:
+
+| Commit | Ficheros |
+|---|---|
+| `docs(slos): record the agreed thresholds and the API observability gap` | `docs/SLOS.md`, `NOTES.md`, `docs/TRADEOFFS.md` |
+
+El transcript del repo llega hasta el cierre de la fase 5 y no incluye estos dos últimos mensajes. Si quieres que quede completo, lo regenero dentro de ese mismo commit.
+
+¿Hago el commit, con o sin el transcript regenerado?
+
+## Human (42)
+
+Genial.  De acuerdo, esto siguiendo el readme para un ultimo repaso del ejercicio, y todas lass queries funcionan. He visto un problema al leer el readme y la url del backedn, falta añadir https://localhost:3000/ debería tener detrás la versión major , es decir https://localhost:3000/v1/url final cambialo, plasmalo en la doc, y añadelo al transcript y donde toque. adelante, luego añade el commit necesario.
+
+**Agent:**
+
+Antes de cambiarlo, un aviso: esto choca con una decisión registrada (D-27). Las rutas van sin versión porque el brief dice que los bancos ya consumen `GET /cases/:id` y pide que siga funcionando. Para cumplir las dos cosas haré que `/v1/...` sea la URL oficial y documentada, y mantendré la ruta antigua sin versión como alias, de modo que nada se rompe. Miro el código.
+
+<details><summary>1 action</summary>
+
+- `Bash` — Find every place the API paths are defined or mentioned
+
+</details>
+
+## Human (43)
+
+Cierto, de acuerdo, pero quiero dejarlo documentado entonces solo, añadelo, que lo mejor sería añadir versionado pero por  continuidad del servicio no se añade el versionado.
+
+<details><summary>5 actions</summary>
+
+- `Bash` — Check the README change and where the versioning decision is recorded
+- `Bash` — Find where path versioning is discussed
+- `Bash` — Commit the SLO notes, then document the versioning decision
+- `Bash` — Commit the versioning documentation
+- `export_transcript`
+
+</details>
