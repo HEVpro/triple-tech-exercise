@@ -1,3 +1,5 @@
+[![ci](https://github.com/HEVpro/triple-tech-exercise/actions/workflows/ci.yml/badge.svg)](https://github.com/HEVpro/triple-tech-exercise/actions/workflows/ci.yml)
+
 # Triple Dispute Platform
 
 A dispute-case service for an issuer's chargeback operations team, so that scheme deadlines are not
