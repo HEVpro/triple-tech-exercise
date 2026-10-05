@@ -5208,8 +5208,236 @@ El primero es el urgente, porque `main` está en rojo en GitHub y no depende de 
 
 Si, puedes hacer estos commits.
 
-<details><summary>1 action</summary>
+<details><summary>5 actions</summary>
 
 - `Bash` — Create the fix, console and docs commits
+- `export_transcript`
+- `Bash` — Regenerate the transcript and run the privacy checks
+- `Bash` — Commit the transcript and compare with the remote
+- `Bash` — Verify each new commit with the gates
+
+</details>
+
+**Agent:**
+
+Los cuatro commits están hechos y listos para tu push. Cada uno se verificó por separado (instalación limpia, typecheck, lint, formato y tests) y todos pasan; el último queda con 210 tests y el árbol de trabajo limpio.
+
+| Commit | Qué hace |
+|---|---|
+| `6dfae8b fix(test): survive both errors of a concurrent role creation` | Arregla el fallo de la pipeline |
+| `b8370c5 feat(console): serve a one-page console over the public API` | La consola, con el botón de cerrar caso, su test y el paso 9 del README |
+| `7b75339 docs: record why the console is a static page` | TRADEOFFS §16, NOTES 2.32 y D-52 |
+| `d98e9ea docs: extend the agent transcript to the console` | Transcript regenerado con la sesión entera |
+
+- **Pipeline:** el arreglo va en el primer commit, así que el push debería dejar `main` en verde. No puedo ver el resultado en GitHub porque el conector no está conectado en esta sesión; si vuelve a fallar, pégame el log.
+- **Transcript:** no contiene tu usuario ni tu email, ni el token de desarrollo que usé para probar la consola, y gitleaks no encuentra secretos.
+- **API en marcha:** sigue arrancada en el panel del navegador, en el puerto 3000. Dime si quieres que la pare.
+
+Sigue pendiente tu decisión sobre la tendencia y el nivel de servicio en la consola: cada una necesita antes un endpoint nuevo.
+
+## Human (48)
+
+De acuerdo, repasemos de nuevo que todo está cubierto al 100%, incluso la consola, para dejar por cerrada la prueba técnica.
+
+<details><summary>4 actions</summary>
+
+- `Bash` — Check remote state, CI runs and every local gate
+- `Bash` — Search the docs for stale statements and list scenario tests
+- `Bash` — List scenario tests and wait for the CI run to finish
+- `Bash` — List report tests and count recorded failures, decisions and migrations
+
+</details>
+
+**Agent:**
+
+Sí: todo lo que pide el brief está cubierto, la consola incluida, y lo he comprobado ahora mismo, no de memoria. La prueba se puede dar por cerrada; solo queda un retoque opcional de documentación, que detallo al final.
+
+## Estado del repositorio
+
+- **Todo está en GitHub.** Tu rama local y `origin/main` coinciden, sin nada pendiente.
+- **La pipeline está en verde** en el último commit (`docs: extend the agent transcript to the console`): tests y build, lint de mensajes de commit y escaneo de secretos. El arreglo de la carrera de roles funcionó.
+- **Comprobaciones locales, todas pasan:** typecheck, lint, formato, esquema sin cambios pendientes, build, gitleaks, 0 vulnerabilidades en dependencias de producción, y 210 tests en 30 ficheros con un 95% de cobertura.
+
+## Backend
+
+| Lo que pide el brief | Dónde está |
+|---|---|
+| Crear y consultar un caso | `POST /cases`, `GET /cases/:id`, `GET /cases?external_ref=` |
+| Transición con auditoría | `POST /cases/:id/transitions`; evento y caso en la misma transacción |
+| Historial a una fecha | `GET /cases/:id/history?as_of=` |
+| Informe de cola atascada | `GET /reports/stuck-queue` |
+| Migraciones contra datos reales | 17 migraciones y `docs/MIGRATION_PLAN.md` |
+| Las tres reglas de negocio y las reglas terminales | Dominio en bloques, con tests |
+| `GET /cases/:id` sigue funcionando | Rutas sin versión y tres contratos congelados |
+| Bonus: SLOs y alertas | `docs/SLOS.md` y `src/monitoring` |
+
+## Los cuatro escenarios de revisión
+
+| Escenario | Evidencia |
+|---|---|
+| 1. Visa a 40 días, en riesgo | Test con ese nombre, en el caso y en el informe |
+| 2. Mastercard a 50 días, vencido | Test con ese nombre, en el caso y en el informe |
+| 3. 400 eventos en menos de 200 ms | Test del historial con 400 eventos; 4–6 ms medidos con 27,9M eventos |
+| 4. 10M filas en menos de 100 ms, con `EXPLAIN` | 17–24 ms medidos; `EXPLAIN` literal en `docs/PERFORMANCE.md` |
+
+## Frontend (opcional en el brief)
+
+El brief pide una página con tabla de casos en riesgo y línea temporal del historial. La consola en `/console` tiene las dos cosas, más el resumen por estado, la vista a una fecha y el botón de cerrar caso. Tiene su test y está probada en navegador contra los 10M de casos.
+
+## Entregables
+
+- **Repositorio** iniciado con un commit vacío e historial intacto.
+- **README** con cómo ejecutar (pasos 1 a 9, que tú mismo seguiste), ejemplos cURL y plan de migración.
+- **NOTES.md** con 33 fallos contados, 52 decisiones registradas y el transcript enlazado.
+
+## Lo que no está, dicho en el propio repo
+
+NOTES §4 lo lista para que quien revise no lo descubra por su cuenta. Lo principal:
+- El lado de Sentry está sin configurar, y los objetivos no se pueden leer por la API.
+- La consola no muestra tendencia ni nivel de servicio, y es de solo lectura.
+- La autenticación es solo de desarrollo.
+- La retención de `case_events` queda sin decidir.
+
+## El retoque opcional
+
+1. **El resumen de estado del README no menciona la consola.** El paso 9 y la tabla de endpoints sí la explican; falta una frase en "Project status".
+2. **El transcript no incluye este último repaso.** Llega hasta la consola.
+
+Si quieres dejarlo redondo, sería un único commit de documentación con las dos cosas. Si no, la prueba ya es entregable tal como está en GitHub.
+
+Para el debate de 45 minutos, lo más útil que tienes son las tres desviaciones del brief en TRADEOFFS §14 y la decisión del versionado en §14b.
+
+## Human (49)
+
+Añpadamos el repaso al trasncript. En el readme añadir la consola. pero por otro lado, hemos creado una tabla que tiene 0 uso aqui que es triple.public.tenant_rule_config, por ende, o lo documentamos como una alternativa que estaría bien añadir, o si no tiene business logic, lo mejor es hacer un amigración para quitarla. Analizemos estos primero.
+
+<details><summary>2 actions</summary>
+
+- `Bash` — Find every use of the tenant rule configuration table
+- `Bash` — Read how rule order is resolved and what it can change
+
+</details>
+
+**Agent:**
+
+La tabla sí se usa, y además es un requisito del brief; no la quitaría. Pero al revisarla he encontrado un hueco real, y creo que eso es lo que has detectado.
+
+## Qué hace hoy
+
+- **Se lee en cada escritura.** Crear un caso, hacer una transición y el sweeper consultan `tenant_rule_config` para saber en qué orden evaluar las reglas de ese banco.
+- **Está vacía.** Sin filas se aplica el orden por defecto, así que todos los bancos se comportan igual.
+- **Solo se puede rellenar con SQL.** No hay API ni script para configurarla.
+
+## Por qué existe
+
+El brief lo pide literalmente: *"Terminal Rules: **Configurable, ordered** rules that map events to a final status"*. La tabla es la parte "configurable": las reglas están en código y su orden por banco es un dato. Si la eliminamos, las reglas quedan fijas en código y dejamos de cumplir esa frase.
+
+## Qué puede cambiar de verdad
+
+Poco, y ya está dicho en TRADEOFFS §12. El orden solo importa entre dos reglas, "plazo vencido" y "resultado del esquema", en un caso concreto: un caso sin evidencia, con el plazo pasado, al que le llega un resultado del esquema.
+
+| Orden | Qué ocurre |
+|---|---|
+| Por defecto (plazo primero) | El caso se da por perdido por plazo, aunque el esquema diga que se ganó |
+| Con "resultado del esquema" primero | Manda lo que decida el esquema |
+
+Es una decisión de negocio legítima que un banco podría querer distinta, y por eso tiene sentido que sea configurable.
+
+## El hueco
+
+**No hay ninguna prueba de que configurar una fila cambie una decisión de punta a punta.** Lo que hay son tests unitarios de la función que ordena las reglas. Nadie ha comprobado que una fila en la tabla, leída por la base de datos, altere el resultado de una transición real. Hoy es una funcionalidad que decimos tener y nunca hemos visto funcionar entera.
+
+## Opciones
+
+| | Qué supone | Valoración |
+|---|---|---|
+| **A. Mantenerla y probarla** | Un test de integración que inserta una fila y demuestra que la decisión cambia, más un párrafo en la documentación con el SQL para configurarla | **La recomiendo.** Cumple el brief y cierra el hueco con poco trabajo |
+| B. Mantenerla y solo documentarla | Sin test | Deja sin probar algo que afirmamos |
+| C. Eliminarla con una migración | Reglas fijas en código; hay que quitar la consulta, el puerto y el esquema | Incumple "configurable" del brief. Solo tendría sentido si decides que ese requisito no aplica |
+| D. Añadir una API para configurarla | Endpoints nuevos, permisos, validación | Nadie la ha pedido; sería excederse |
+
+Un dato a favor de C, para que lo tengas: mantenerla cuesta una consulta extra por clave primaria en cada escritura. Es muy barata, pero existe.
+
+Si eliges A, el test puede descubrir que la configuración no funciona como creemos. En ese caso te lo cuento antes de arreglar nada.
+
+¿Vamos con A? El commit con el README y el transcript lo hago después, cuando esto esté decidido, para que el transcript recoja también este análisis.
+
+## Human (50)
+
+yo creo que tener una tabla vacía qu eno aplica a negocio es absruda, así que haría la A, añadirira configuración de algun tenant para ver la diferencia, y luego aplicaría ahí los tests y verificaría que tdoo funciona perfectametne, par ami es el unico gap que veo por ahora.
+
+<details><summary>15 actions</summary>
+
+- `Bash` — Read the transition tests and how a past-deadline open case is built
+- `Bash` — Read the test helper request signature and nearby tests
+- `Bash` — Write the rule-order integration test and run it
+- `Bash` — Read the dev seed script and tenants
+- `Bash` — Seed Globex's rule order, reuse it in the test, apply to dev DB
+- `Bash` — Run the rule-order comparison by hand against the real API
+- `preview_list`
+- `Bash` — Check why the API call returned no JSON
+- `preview_stop`
+- `preview_start`
+- `Bash` — Run the rule-order comparison by hand against the restarted API
+- `Bash` — Find where rule order and the dev seed are documented
+- `Bash` — Read the passages to update
+- `Bash` — Document the rule order per bank and run the gates
+- `Bash` — Run the README's step 10 commands exactly as written
+
+</details>
+
+**Agent:**
+
+El hueco está cerrado, **sin commit**: la configuración por banco funciona y ahora hay pruebas de ello. Pasan typecheck, lint, formato y 215 tests en 31 ficheros.
+
+## Lo que he hecho
+
+- **Globex tiene una configuración real.** `npm run dev:seed` le pone una fila que evalúa el resultado del esquema antes que el plazo. Acme sigue con el orden por defecto, así que se pueden comparar. Ya está aplicado en tu base.
+- **Test de integración nuevo** (`test/http/rule-order.integration.test.ts`, 5 tests). Manda la misma petición a los dos bancos y comprueba:
+  - Acme la rechaza con 409, decidido por `deadline_passed`.
+  - Globex registra `WON`, decidido por `scheme_outcome`.
+  - El orden no desactiva el plazo: sin resultado del esquema, el sweeper sigue dando el caso por perdido.
+  - El orden no reescribe el pasado: un caso ya decidido conserva su decisión aunque cambie la configuración.
+
+Todo pasó a la primera. La funcionalidad ya funcionaba; faltaba la evidencia.
+
+## Comprobado a mano contra la API
+
+He ejecutado el bloque del README tal cual está escrito, y devuelve esto:
+
+```json
+{"bank":"acme","error":"rule_conflict","decided_by":"deadline_passed","status":null}
+{"bank":"globex","error":null,"decided_by":"scheme_outcome","status":"WON"}
+```
+
+## Lo que debes saber
+
+- **El alcance es estrecho.** El orden solo cambia una decisión: caso sin evidencia, plazo vencido, y el resultado del esquema llega antes de que el sweeper cierre el caso. En producción esa ventana dura alrededor de un minuto. Ahora está escrito en TRADEOFFS §12 y en DOMAIN, junto a la descripción de la funcionalidad.
+- **Sigue sin API de configuración.** Se configura con un `INSERT` como propietario de la base; el README trae el SQL.
+- **He escrito en tu base de datos.** La fila de Globex, y cuatro casos de prueba con referencia `RULES-...` (dos por cada pasada de comprobación), que aparecen en la consola.
+- **La API se había caído.** Las verificaciones de commits anteriores reinstalaron dependencias con el servidor en marcha. La reinicié y sigue arrancada en el puerto 3000.
+
+## Documentación
+
+- **README:** paso 10 nuevo, "Rule order per bank", con el ejemplo y el SQL. La tabla de bancos indica el orden de cada uno, y el estado del proyecto ya menciona la consola.
+- **NOTES 2.34:** cuenta que viste la tabla vacía, que no estaba sin uso pero sí sin probar, y cómo se cerró. D-8 y §4 están actualizados.
+
+## Plan de commits
+
+| # | Commit | Contenido |
+|---|---|---|
+| 1 | `test(rules): prove a bank's rule order changes a decision` | El test, la configuración de Globex en el seed, README paso 10, DOMAIN, TRADEOFFS §12, NOTES 2.34 |
+| 2 | `docs(readme): mention the console in the project status` | La frase del estado del proyecto |
+| 3 | `docs: extend the agent transcript to the final review` | Transcript regenerado, con el repaso y este análisis |
+
+¿Hago los tres commits?
+
+## Human (51)
+
+Adelante. Y con esto confirmamos que el 100% está cerrado y la prueba acabada, correcto?
+
+<details><summary>1 action</summary>
+
+- `Bash` — Commit the rule-order proof and the README status line
 
 </details>
